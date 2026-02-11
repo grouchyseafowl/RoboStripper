@@ -54,6 +54,10 @@ OUTPUT_DIR = SCRIPT_DIR / "output"
 
 def check_and_install_deps():
     """Check for required packages and offer to install them."""
+    # Skip if running as PyInstaller bundle (dependencies are already bundled)
+    if getattr(sys, 'frozen', False):
+        return
+
     missing = []
 
     try:
@@ -236,6 +240,137 @@ def detect_front_matter_pages(pages: list[str]) -> int:
     if any(m in first_page for m in front_matter_markers) and len(pages[0]) < 500:
         return 1
     return 0
+
+
+def extract_citation(pdf_path: Path, raw_pages: list[str]) -> dict:
+    """
+    Extract citation metadata from PDF metadata and first-page text.
+    Returns dict with keys: title, author, date, source.
+    Values are strings or None. Conservative — prefers no info over wrong info.
+    """
+    info = {"title": None, "author": None, "date": None, "source": None}
+
+    # Junk PDF metadata values to ignore
+    junk = {"untitled", "sometitle", "someauthor", "unknown", "none", "microsoft word"}
+
+    # 1. Try PDF file metadata
+    try:
+        doc = fitz.open(pdf_path)
+        meta = doc.metadata or {}
+        doc.close()
+
+        title = (meta.get("title") or "").strip()
+        author = (meta.get("author") or "").strip()
+
+        if title and len(title) > 3 and title.lower() not in junk:
+            info["title"] = title
+        if author and len(author) > 1 and author.lower() not in junk:
+            info["author"] = author
+    except Exception:
+        pass
+
+    if not raw_pages:
+        return info
+
+    first_page = raw_pages[0]
+    lines = [l.strip() for l in first_page.split('\n') if l.strip()]
+
+    # 2. Try to capture ProQuest citation line (before it's stripped)
+    #    Format: "Last, First. Title : Subtitle, Publisher, Year. ProQuest"
+    for line in lines:
+        if re.search(r'\.\s*ProQuest\s*(Ebook Central)?\.?\s*$', line):
+            # Split on ". " to get author and rest — first period-space is author/title boundary
+            m = re.match(r'^([^.]+,\s*[^.]+)\.\s+(.+),\s+.+,\s+(\d{4})\.\s*ProQuest', line)
+            if m:
+                info["author"] = info["author"] or m.group(1).strip()
+                info["title"] = info["title"] or m.group(2).strip().rstrip(',')
+                info["date"] = info["date"] or m.group(3)
+            break
+
+    # 3. Try to extract journal info from T&F / journal headers
+    for line in lines:
+        # "JOURNAL OF LATINOS AND EDUCATION" style
+        if line.isupper() and 15 < len(line) < 100 and "JOURNAL" in line:
+            info["source"] = info["source"] or line.strip()
+        # "2024, VOL. 23, NO. 2, 474–491"
+        m = re.match(r'^(\d{4}),\s*VOL\.\s*(\d+),\s*NO\.\s*(\d+)', line, re.IGNORECASE)
+        if m:
+            info["date"] = info["date"] or m.group(1)
+            if info["source"]:
+                info["source"] += f" Vol. {m.group(2)}, No. {m.group(3)}"
+
+    # 4. Try EBSCO/Duke publisher line for source
+    for line in lines:
+        m = re.match(r'^(\d{4})\.\s+(.+(?:Press|Books|Publishing|Publishers).+)\.\s*$', line)
+        if m:
+            info["date"] = info["date"] or m.group(1)
+            info["source"] = info["source"] or m.group(2).strip()
+
+    # 5. Guess title from first page text ONLY if we have nothing from structured sources.
+    #    Very conservative — better to show no title than a wrong one.
+    if not info["title"]:
+        skip_patterns = [
+            r'^(Chapter|Part|Section)\s+\w+',
+            r'^OTHER\s+WORKS',
+            r'^PUBLISHED\s+BY',
+            r'^(Also|See)\s+',
+            r'also appears',
+            r'^(Edited|Translated|With|Foreword)',
+            r'^\d{4}\.',
+        ]
+        for line in lines[:10]:
+            # Must be substantial — short lines are often fragments of multi-line titles
+            if len(line) < 20 or re.match(r'^\d+$', line):
+                continue
+            # Must start with uppercase (skip broken drop-cap lines)
+            if line[0].islower():
+                continue
+            # Skip fragments (trailing comma, semicolon, hyphen)
+            if line.rstrip()[-1] in ',;-':
+                continue
+            if any(re.search(p, line, re.IGNORECASE) for p in skip_patterns):
+                continue
+            if any(p.search(line) for _, p, _ in METADATA_PATTERNS):
+                continue
+            info["title"] = line
+            break
+
+    # Author guessing from unstructured text is too unreliable —
+    # only use author from PDF metadata or ProQuest citation parsing above.
+
+    return info
+
+
+def format_citation_header(citation: dict) -> str:
+    """
+    Format citation info as a TTS-friendly header block.
+    Only produces output when we have confident data — at minimum a title
+    plus one other field (author, source, or date).
+    """
+    has_title = bool(citation.get("title"))
+    has_author = bool(citation.get("author"))
+    has_source = bool(citation.get("source"))
+    has_date = bool(citation.get("date"))
+
+    # Require title + at least one other field to avoid showing garbage
+    if not has_title or not (has_author or has_source or has_date):
+        return ""
+
+    parts = []
+    parts.append(citation["title"])
+    if has_author:
+        parts.append(f"By {citation['author']}")
+
+    source_date = []
+    if has_source:
+        source_date.append(citation["source"])
+    if has_date:
+        source_date.append(citation["date"])
+    if source_date:
+        parts.append(", ".join(source_date))
+
+    header = "\n".join(parts)
+    return f"{header}\n\n{'—' * 40}\n\n"
 
 
 def extract_text(pdf_path: Path) -> list[str]:
@@ -496,12 +631,20 @@ def process_file(input_path: Path, output_path: Optional[Path], preview: bool, f
         print(f"    {YELLOW}No text extracted from {input_path.name}{R}", file=sys.stderr)
         return None
 
+    # Extract citation info from raw pages BEFORE cleaning
+    citation = extract_citation(input_path, pages)
+    citation_header = format_citation_header(citation)
+
     cleaned_text = clean_document(pages)
     if not cleaned_text:
         print(f"    {YELLOW}No text remaining after cleaning {input_path.name}{R}", file=sys.stderr)
         return None
 
     formatted_text = format_for_tts(cleaned_text, faithful=faithful)
+
+    # Prepend citation header
+    if citation_header:
+        formatted_text = citation_header + formatted_text
 
     if preview:
         print("\n" + "="*80)
