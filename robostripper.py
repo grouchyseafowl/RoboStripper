@@ -34,15 +34,15 @@ PROFILES = {
     "cunty": {
         "name": "Cunty",
         "banner_emoji": "👠✨💅",
-        "greeting": "Hey love! I'm your friendly neigheboard RoboStripper",
-        "tagline": "🔥 No more interrupttions! 🔥",
-        "subtitle": "Just good, clean fun.\nLike a spa day but its homework.",
+        "greeting": "Hey love! I'm your friendly neighborhood RoboStripper",
+        "tagline": "🔥 No more interruptions! 🔥",
+        "subtitle": "Just good, clean fun.\nLike a spa day but it's homework.",
         "working_emoji": "💅",
         "success_emoji": "✨",
         "error_emoji": "😱😫😭",
         "goodbye": "👠 Standing by. You know where to find me.",
         "go_get_em": "💋 Go get 'em.",
-        "first_time": "Oh, its your first time? 👀",
+        "first_time": "Oh, it's your first time? 👀",
         "need_packages": "I need a few *packages* to work my magic 😏😘",
         "old_files": "Ew, babe. I found {n} old file{s} in ~/StrippedText/ 😵‍💫",
         "cleanup_prompt": "Want me to send in the {maid} to clean up this {mess} and delete the old files?",
@@ -941,7 +941,7 @@ def print_banner(first_time=True):
             print("")
 
         # Main content (always shown)
-        print(f"  Dispite my name, there will be no innuendo or sillyness whatsoever.")
+        print(f"  Despite my name, there will be no innuendo or silliness whatsoever.")
         print()
         print(f"  NOTICE: {DIM}This application processes PDF documents to remove extraneous header and footer{R}")
         print(f"  {DIM}information for using {R}RoboBraille {DIM}and {R}screen readers{DIM}.{R}")
@@ -958,7 +958,7 @@ def print_banner(first_time=True):
         print(f"    🟥 Exit Command:        {DIM}'{R}{BOLD}quit{DIM}' (red tape requires approval){R}")
         print("")
         print(f"  {WHITE}DISCLAIMER: {DIM}By using this software, you acknowledge that you have read and agree to the{R}")
-        print(f"  {DIM}terms and conditions of having your soul stored in the void of dispair, never to experience{R}")
+        print(f"  {DIM}terms and conditions of having your soul stored in the void of despair, never to experience{R}")
         print(f"  {DIM}joy or color again. Consult your IT administrator for additional guidance.{R}")
         print()
 
@@ -1167,7 +1167,7 @@ def pick_files(show_initial_banner=True) -> list[Path]:
             print()
             print(f"  {CYAN}Drag and drop those files right here in my window, boo 😘{R}")
             print(f"     Then press Enter and I'll take care of the rest {R}")
-            print(f"     {DIM}Multiple files? No problem. I can take care as many as you want.{R}")
+            print(f"     {DIM}Multiple files? No problem. I can take care of as many as you want.{R}")
             print(f"     {DIM}All at once{R}")
             print(f"     {DIM}(Type 'quit' to exit){R}")
         else:
