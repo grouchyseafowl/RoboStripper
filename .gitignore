@@ -6,4 +6,4 @@ dist/
 *.spec
 *.egg-info/
 .DS_Store
-output/*.txt
+StrippedText/*.txt

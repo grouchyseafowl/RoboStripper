@@ -63,6 +63,8 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+
       - name: Download Mac build
         uses: actions/download-artifact@v4
         with:
@@ -81,4 +83,5 @@ jobs:
           files: |
             mac/RoboStripper
             windows/RoboStripper.exe
+            robostripper.py
           generate_release_notes: true

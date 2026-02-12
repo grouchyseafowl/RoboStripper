@@ -4,25 +4,8 @@ REM ✨ RoboStripper — double-click to run ✨
 
 cd /d "%~dp0"
 
-REM Offer to clean up other OS launchers
-set "HAS_OTHERS=0"
-if exist "START HERE — Mac.command" set "HAS_OTHERS=1"
-if exist "START HERE — Linux.sh" set "HAS_OTHERS=1"
-
-if "%HAS_OTHERS%"=="1" (
-    echo.
-    echo   👀 I see launcher files for other operating systems.
-    echo      Since you're on Windows, want me to remove them?
-    echo.
-    set /p cleanup="  Delete other launchers? [y/N] "
-    echo.
-    if /i "!cleanup!"=="y" (
-        if exist "START HERE — Mac.command" del "START HERE — Mac.command"
-        if exist "START HERE — Linux.sh" del "START HERE — Linux.sh"
-        echo   ✨ Cleaned up. Just you and me now.
-        echo.
-    )
-)
+REM Resize terminal window to fit the banner (35 rows x 80 cols)
+mode con: cols=80 lines=35
 
 where python >nul 2>nul
 if %errorlevel%==0 (
@@ -49,12 +32,10 @@ echo.
 echo   Hey love! Before I can work my magic, I need
 echo   Python installed on your computer.
 echo.
-echo   Python is a free programming language — think of
-echo   it like an engine under the hood. You install it
-echo   once and never think about it again.
+echo   Python is free — think of it like an engine under
+echo   the hood. Install it once, never think about it again.
 echo.
-echo   IMPORTANT: During install, check the box that says
-echo   "Add Python to PATH" — this lets me find it.
+echo   ⚠️  IMPORTANT: Check "Add Python to PATH" during install!
 echo.
 echo   ─────────────────────────────────────────────────
 echo.
@@ -65,20 +46,20 @@ if /i "%answer%"=="n" goto decline
 if /i "%answer%"=="no" goto decline
 
 start https://www.python.org/downloads/
-echo   ✨ Opening python.org...
+echo   💅 Opening python.org...
 echo.
-echo   Once you've installed it:
+echo   Once you've installed Python:
 echo     1. Close this window
 echo     2. Double-click me again
 echo.
-echo   💋 See you in a sec.
+echo   💋 See you in a sec!
 echo.
 pause
 exit /b
 
 :decline
 echo   👠 No worries. Install Python whenever you're ready,
-echo      then double-click me again.
+echo      then come back and double-click me.
 echo.
 pause
 exit /b
