@@ -1,4 +1,4 @@
-# RoboStripper 👠✨💅
+# 👠✨💅 RoboStripper 💅✨👠
 
 **Strip metadata from scholarly PDFs for clean RoboBraille audio conversion**
 
