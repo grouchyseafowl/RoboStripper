@@ -20,7 +20,7 @@ jobs:
         run: pip install pyinstaller pymupdf pytesseract Pillow
 
       - name: Create icon files
-        run: python3 create_icons.py
+        run: python3 scripts/create_icons.py
 
       - name: Build .app
         run: |
@@ -28,7 +28,7 @@ jobs:
             --name "RoboStripper" \
             --onefile \
             --console \
-            --icon robostripper_icon.icns \
+            --icon assets/robostripper_icon.icns \
             robostripper.py
 
       - name: Upload Mac build
@@ -50,11 +50,11 @@ jobs:
         run: pip install pyinstaller pymupdf pytesseract Pillow
 
       - name: Create icon files
-        run: python3 create_icons.py
+        run: python3 scripts/create_icons.py
 
       - name: Build .exe
         run: |
-          pyinstaller --name "RoboStripper" --onefile --console --icon robostripper_icon.ico robostripper.py
+          pyinstaller --name "RoboStripper" --onefile --console --icon assets/robostripper_icon.ico robostripper.py
 
       - name: Upload Windows build
         uses: actions/upload-artifact@v4

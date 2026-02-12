@@ -43,16 +43,19 @@ def create_icns(png_path, icns_path):
     # shutil.rmtree(iconset_dir)
 
 if __name__ == '__main__':
-    png_file = 'robostripper_icon.png'
+    # Paths relative to project root
+    png_file = 'assets/robostripper_icon.png'
+    ico_file = 'assets/robostripper_icon.ico'
+    icns_file = 'assets/robostripper_icon.icns'
 
     if not os.path.exists(png_file):
         print(f"Error: {png_file} not found!")
         sys.exit(1)
 
     # Create ICO for Windows
-    create_ico(png_file, 'robostripper_icon.ico')
+    create_ico(png_file, ico_file)
 
     # Create ICNS for macOS
-    create_icns(png_file, 'robostripper_icon.icns')
+    create_icns(png_file, icns_file)
 
     print("Icon conversion complete!")
