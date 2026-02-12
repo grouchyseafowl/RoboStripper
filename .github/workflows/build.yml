@@ -31,11 +31,53 @@ jobs:
             --icon assets/robostripper_icon.icns \
             robostripper.py
 
-      - name: Make executable and create ZIP
+      - name: Create proper .app bundle
         run: |
-          chmod +x dist/RoboStripper/RoboStripper
+          # Create .app structure
+          mkdir -p "dist/RoboStripper.app/Contents/MacOS"
+          mkdir -p "dist/RoboStripper.app/Contents/Resources"
+
+          # Move the PyInstaller bundle into MacOS
+          mv dist/RoboStripper/* "dist/RoboStripper.app/Contents/MacOS/"
+          rmdir dist/RoboStripper
+
+          # Copy icon
+          cp assets/robostripper_icon.icns "dist/RoboStripper.app/Contents/Resources/"
+
+          # Create Info.plist
+          cat > "dist/RoboStripper.app/Contents/Info.plist" << 'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleExecutable</key>
+              <string>RoboStripper</string>
+              <key>CFBundleIconFile</key>
+              <string>robostripper_icon.icns</string>
+              <key>CFBundleIdentifier</key>
+              <string>com.grouchyseafowl.robostripper</string>
+              <key>CFBundleName</key>
+              <string>RoboStripper</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>CFBundleShortVersionString</key>
+              <string>1.0.0</string>
+              <key>CFBundleVersion</key>
+              <string>1.0.0</string>
+              <key>LSMinimumSystemVersion</key>
+              <string>10.13</string>
+              <key>NSHighResolutionCapable</key>
+              <true/>
+          </dict>
+          </plist>
+          EOF
+
+          # Make executable
+          chmod +x "dist/RoboStripper.app/Contents/MacOS/RoboStripper"
+
+          # Create ZIP
           cd dist
-          zip -r RoboStripper-Mac.zip RoboStripper
+          zip -r RoboStripper-Mac.zip RoboStripper.app
 
       - name: Upload Mac build
         uses: actions/upload-artifact@v4
