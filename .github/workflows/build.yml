@@ -22,7 +22,7 @@ jobs:
       - name: Create icon files
         run: python3 scripts/create_icons.py
 
-      - name: Build .app
+      - name: Build Mac executable
         run: |
           pyinstaller \
             --name "RoboStripper" \
@@ -33,9 +33,9 @@ jobs:
 
       - name: Make executable and create ZIP
         run: |
-          chmod +x dist/RoboStripper.app/Contents/MacOS/RoboStripper
+          chmod +x dist/RoboStripper/RoboStripper
           cd dist
-          zip -r RoboStripper-Mac.zip RoboStripper.app
+          zip -r RoboStripper-Mac.zip RoboStripper
 
       - name: Upload Mac build
         uses: actions/upload-artifact@v4
