@@ -62,11 +62,16 @@ jobs:
         run: |
           pyinstaller --name "RoboStripper" --onefile --console --icon assets/robostripper_icon.ico robostripper.py
 
+      - name: Create Windows ZIP
+        run: |
+          cd dist
+          powershell Compress-Archive -Path RoboStripper.exe -DestinationPath RoboStripper-Windows.zip
+
       - name: Upload Windows build
         uses: actions/upload-artifact@v4
         with:
           name: RoboStripper-Windows
-          path: dist/RoboStripper.exe
+          path: dist/RoboStripper-Windows.zip
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -94,6 +99,6 @@ jobs:
         with:
           files: |
             mac/RoboStripper-Mac.zip
-            windows/RoboStripper.exe
+            windows/RoboStripper-Windows.zip
             robostripper.py
           generate_release_notes: true
