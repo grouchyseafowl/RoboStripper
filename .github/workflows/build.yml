@@ -26,16 +26,22 @@ jobs:
         run: |
           pyinstaller \
             --name "RoboStripper" \
-            --onefile \
+            --onedir \
             --console \
             --icon assets/robostripper_icon.icns \
             robostripper.py
+
+      - name: Make executable and create ZIP
+        run: |
+          chmod +x dist/RoboStripper.app/Contents/MacOS/RoboStripper
+          cd dist
+          zip -r RoboStripper-Mac.zip RoboStripper.app
 
       - name: Upload Mac build
         uses: actions/upload-artifact@v4
         with:
           name: RoboStripper-Mac
-          path: dist/RoboStripper
+          path: dist/RoboStripper-Mac.zip
 
   build-windows:
     runs-on: windows-latest
@@ -87,7 +93,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            mac/RoboStripper
+            mac/RoboStripper-Mac.zip
             windows/RoboStripper.exe
             robostripper.py
           generate_release_notes: true
