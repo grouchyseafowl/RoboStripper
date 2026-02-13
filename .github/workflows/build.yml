@@ -104,11 +104,30 @@ jobs:
           cd dist
           zip -r RoboStripper-Mac.zip RoboStripper.app INSTALL_MAC.txt
 
-      - name: Upload Mac build
+      - name: Create DMG (alternative distribution)
+        run: |
+          # Create a temporary folder for DMG contents
+          mkdir -p dist/dmg
+          cp -r dist/RoboStripper.app dist/dmg/
+          cp dist/INSTALL_MAC.txt dist/dmg/
+
+          # Create DMG
+          hdiutil create -volname "RoboStripper" -srcfolder dist/dmg -ov -format UDZO dist/RoboStripper-Mac.dmg
+
+          # Clean up
+          rm -rf dist/dmg
+
+      - name: Upload Mac ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: RoboStripper-Mac
+          name: RoboStripper-Mac-ZIP
           path: dist/RoboStripper-Mac.zip
+
+      - name: Upload Mac DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: RoboStripper-Mac-DMG
+          path: dist/RoboStripper-Mac.dmg
 
   build-windows:
     runs-on: windows-latest
@@ -149,11 +168,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download Mac build
+      - name: Download Mac ZIP
         uses: actions/download-artifact@v4
         with:
-          name: RoboStripper-Mac
-          path: mac
+          name: RoboStripper-Mac-ZIP
+          path: mac-zip
+
+      - name: Download Mac DMG
+        uses: actions/download-artifact@v4
+        with:
+          name: RoboStripper-Mac-DMG
+          path: mac-dmg
 
       - name: Download Windows build
         uses: actions/download-artifact@v4
@@ -165,7 +190,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            mac/RoboStripper-Mac.zip
+            mac-zip/RoboStripper-Mac.zip
+            mac-dmg/RoboStripper-Mac.dmg
             windows/RoboStripper-Windows.zip
             robostripper.py
           generate_release_notes: true
