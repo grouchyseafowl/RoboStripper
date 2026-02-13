@@ -75,9 +75,34 @@ jobs:
           # Make executable
           chmod +x "dist/RoboStripper.app/Contents/MacOS/RoboStripper"
 
-          # Create ZIP
+      - name: Create installation instructions
+        run: |
+          cat > dist/INSTALL_MAC.txt << 'EOF'
+          📦 RoboStripper for Mac - Installation Instructions
+
+          If you see "RoboStripper is damaged and can't be opened":
+
+          This is a macOS security feature (Gatekeeper) blocking unsigned apps.
+
+          FIX #1 - Right-click to open:
+            1. Right-click (or Control+click) on RoboStripper.app
+            2. Select "Open" from menu
+            3. Click "Open" in the dialog
+            4. The app will now work!
+
+          FIX #2 - Terminal command:
+            1. Open Terminal
+            2. Run: xattr -cr "/path/to/RoboStripper.app"
+            3. Drag the app to Terminal to get the path
+            4. Press Enter
+
+          After first open, you can double-click normally.
+
+          👠✨💅
+          EOF
+
           cd dist
-          zip -r RoboStripper-Mac.zip RoboStripper.app
+          zip -r RoboStripper-Mac.zip RoboStripper.app INSTALL_MAC.txt
 
       - name: Upload Mac build
         uses: actions/upload-artifact@v4
