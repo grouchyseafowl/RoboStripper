@@ -9,3 +9,18 @@ dist/
 StrippedText/*.txt
 RELEASING.md
 *.iconset/
+
+# Claude Code working directories
+.claude/
+
+# Built applications (build artifacts)
+*.app/
+*.dmg
+
+# Built executables (use GitHub Releases instead)
+RoboStripper
+RoboStripper-Windows
+RoboStripper.zip
+
+# Worktrees
+.git/worktrees/
