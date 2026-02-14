@@ -120,9 +120,10 @@ def _supports_color():
 
 USE_COLOR = _supports_color()
 
-MAGENTA = "\033[95m" if USE_COLOR else ""
-PINK = "\033[35m" if USE_COLOR else ""
-CYAN = "\033[96m" if USE_COLOR else ""
+MAGENTA = "\033[95m" if USE_COLOR else ""  # Hot pink in GUI - same as PINK
+PINK = "\033[35m" if USE_COLOR else ""     # Hot pink in GUI
+CYAN = "\033[96m" if USE_COLOR else ""     # Champagne gold in GUI - friendly text, instructions
+EMERALD = "\033[94m" if USE_COLOR else ""  # Emerald in GUI - commands only
 YELLOW = "\033[93m" if USE_COLOR else ""
 GREEN = "\033[92m" if USE_COLOR else ""
 WHITE = "\033[97m" if USE_COLOR else ""
@@ -182,7 +183,7 @@ def check_and_install_deps():
 
         if answer not in ('', 'y', 'yes'):
             print(f"\n  {PINK}Whatever, boo 💅 Install manually with:{R}")
-            print(f"    {CYAN}pip install {' '.join(missing)}{R}")
+            print(f"    {EMERALD}pip install {' '.join(missing)}{R}")
             print()
             sys.exit(1)
     else:
@@ -850,36 +851,38 @@ def print_banner(first_time=True):
     # Resize terminal to fit banner
     resize_terminal()
 
-    print()
-
     if CURRENT_PROFILE == "cunty":
         # ═══════════════════════════════════════════════════════════
         # CUNTY PROFILE BANNER: Colorful, playful, fabulous
         # ═══════════════════════════════════════════════════════════
-        print(f"  {MAGENTA}┌────────────────────────────────────────────────────────────────────┐{R}")
-        print(f"  {MAGENTA}│{R}              {BOLD}{MAGENTA}👠✨💅  R O B O S T R I P P E R  💅✨👠{R}               {MAGENTA}│{R}")
-        print(f"  {MAGENTA}└────────────────────────────────────────────────────────────────────┘{R}")
+        # Elegant high-femme title treatment with borders
+        print(f"{MAGENTA}{'─' * 71}{R}")
+        print(f"{BOLD}{MAGENTA}               👠✨💅  R O B O S T R I P P E R  💅✨👠{R}")
+        print(f"{MAGENTA}{'─' * 71}{R}")
         print("")
-        print(f"  {PINK}Hey love!{R} I'm your friendly neighborhood RoboStripper!{R}")
+        print(f"         {PINK}Hey love!{R} {DIM}I'm your friendly neighborhood {R}{WHITE}RoboStripper!{R}")
         print("")
         print(f"  {DIM}I strip {R}{PINK}metadata{R}{DIM} from your PDFs so{R} {CYAN}RoboBraille{R} {DIM}and{R} {CYAN}screen readers{R} {R}")
         print(f"  {DIM}can read to you without interruptions on every page 🤩👌💯{R}")
         print("")
-        print(f"    What is {PINK}metadata{R}? {R}")
+        print(f"                           {MAGENTA}· · · ✦ · · ·{R}")
+        print("")
+        print(f"                         {WHITE}What is{R} {PINK}metadata{R}?")
         print()
         print(f"  {DIM}That's the junk publishers slap on the top and bottom of every page:{R}")
         print(f"  {DIM}copyright stamps, URLs, timestamps, journal/book titles, and page{R}")
         print(f"  {DIM}numbers 😒😤{R}")
         print()
-        print(f"  {MAGENTA}  🔥🔥🔥 No more interruptions! 🔥🔥🔥 {R}")
+        print(f"                           {MAGENTA}· · · ✦ · · ·{R}")
         print()
-        print(f"  {DIM}Just good, clean fun. Like a spa day but its homework 🥂🍾🏖️ 😎{R}")
+        print(f"               {MAGENTA}🔥🔥🔥 No more interruptions! 🔥🔥🔥{R}")
         print()
-        print(f"  {MAGENTA}─────────────────────────────────────────────────────────────────────{R}")
+        print(f"  {DIM}Just good, clean fun. Like a spa day but its homework 🥂🍾🏖️😎{R}")
         print("")
         print(f"  {DIM}Stripped files go to: {R}{CYAN}~/StrippedText/{R}")
         print(f"  {DIM}Upload the stripped files to: {R}{CYAN}robobraille.org{R}")
-        print(f"  {DIM}To quit, type: {R}{CYAN}quit{R}")
+        print()
+        print(f"  {DIM}To quit, type: {R}{EMERALD}quit{R}")
 
     else:
         # ═══════════════════════════════════════════════════════════
@@ -966,7 +969,7 @@ def print_banner(first_time=True):
     # Profile switcher option
     if CURRENT_PROFILE == "cunty":
         # CUNTY PROFILE: Playful hint about switching
-        print(f"  {DIM}Type {R}{CYAN}profile{R}{DIM} to input: \"Help! This UX is {R}*too cunty*{DIM} for me.\"{R}")
+        print(f'  {DIM}Type {R}{EMERALD}profile{R}{DIM} to input: "Help! This UX is {R}{EMERALD}*too cunty*{R}{DIM} for me!"{R}')
     else:
         # NORMIE PROFILE: Bureaucratic hint with form number
         print()
@@ -1163,13 +1166,13 @@ def pick_files(show_initial_banner=True) -> list[Path]:
 
         if CURRENT_PROFILE == "cunty":
             # CUNTY PROFILE: Fun and friendly
-            print(f"  {MAGENTA}─────────────────────────────────────────────────────────────────────{R}")
+            print(f"                           {MAGENTA}· · · ✦ · · ·{R}")
             print()
-            print(f"  {CYAN}Drag and drop those files right here in my window, boo 😘{R}")
-            print(f"     Then press Enter and I'll take care of the rest {R}")
-            print(f"     {DIM}Multiple files? No problem. I can take care of as many as you want.{R}")
-            print(f"     {DIM}All at once{R}")
-            print(f"     {DIM}(Type 'quit' to exit){R}")
+            print(f"      {EMERALD}Drag and drop{R} {WHITE}those files right here in my window, boo{R} 😘")
+            print(f"          {WHITE}Then press {R}{EMERALD}Enter{R} {WHITE}and I'll take care of the rest {R}")
+            print()
+            print(f"  {DIM}Multiple files? No problem. I can take care of as many as you{R}")
+            print(f"  {DIM}want. All at the same time{R}")
         else:
             # NORMIE PROFILE: DMV-style bureaucratic prompt
             print()
@@ -1236,11 +1239,11 @@ def pick_files(show_initial_banner=True) -> list[Path]:
                 # CUNTY PROFILE: User wants to switch to normie
                 # ═══════════════════════════════════════════════════════════
                 print("\033[2J\033[H", end="")
-                print(f"  {MAGENTA}─────────────────────────────────────────────────────────────────────{R}")
+                print(f"                           {MAGENTA}· · · ✦ · · ·{R}")
                 print(f"  {MAGENTA}CHANGE PROFILE?{R}")
-                print(f"  {MAGENTA}─────────────────────────────────────────────────────────────────────{R}")
+                print(f"                           {MAGENTA}· · · ✦ · · ·{R}")
                 print()
-                print(f"  {CYAN}❝ Help! This UX is {R}*too cunty*{PINK} for me.{R}")
+                print(f"  {CYAN}❝ Help! This UX is {R}{EMERALD}*too cunty*{R}{CYAN} for me.{R}")
                 print(f"    {CYAN}Can't you be more professional? ❞{R}")
                 new_profile_name = f"{BOLD}{DIM}NORMIE{R}"
             else:  # normie
