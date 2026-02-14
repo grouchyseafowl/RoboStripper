@@ -46,7 +46,7 @@ python3 robostripper.py
 
 ---
 
-## 🎯 How to Use
+## ✨ How to Use
 
 1. **Launch RoboStripper** (double-click the app, exe, or launcher, or run the Python script)
 
@@ -64,7 +64,7 @@ python3 robostripper.py
 
 ---
 
-## ✨ What It Does
+## 💖 What It Does
 
 **Strips away:**
 - Repeating headers and footers on every page
@@ -146,8 +146,4 @@ MIT License — use it, modify it, share it!
 
 ---
 
-## 💖 Feedback
-
-Found a bug? Have a feature idea? [Open an issue](../../issues)!
-
-Made with 💅 for faculty students who need readings made accessible or just like being read to. 
+Made with 💅 for faculty and students who need readings made accessible or just like being read aloud to by robots. 
