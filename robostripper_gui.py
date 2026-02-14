@@ -21,10 +21,46 @@ import re
 import shlex
 import sys
 import queue
+import subprocess
 import threading
 import tkinter as tk
 from tkinter import font as tkfont
 from tkinter import filedialog
+
+
+# ── Check for drag-and-drop support ──────────────────────────────────────────
+def check_gui_dependencies():
+    """Check and install tkinterdnd2 for drag-and-drop support."""
+    try:
+        from tkinterdnd2 import TkinterDnD  # noqa: F401
+        return True
+    except ImportError:
+        print("\n  💅 First time running the GUI? Let me grab one more package for drag-and-drop!")
+        print("  Installing tkinterdnd2...")
+
+        try:
+            subprocess.check_call(
+                [sys.executable, "-m", "pip", "install", "tkinterdnd2"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            print("  ✨ Drag-and-drop ready! Launching...\n")
+            return True
+        except subprocess.CalledProcessError:
+            print("  ⚠️  Couldn't install tkinterdnd2. Drag-and-drop won't work, but the attach button will!")
+            print("  (You can install it manually with: pip install tkinterdnd2)")
+            return False
+
+
+# Check dependencies on import
+DRAG_DROP_AVAILABLE = check_gui_dependencies()
+
+# Import drag-and-drop if available
+if DRAG_DROP_AVAILABLE:
+    try:
+        from tkinterdnd2 import TkinterDnD, DND_FILES
+    except ImportError:
+        DRAG_DROP_AVAILABLE = False
 
 
 # ── ANSI Color Map ───────────────────────────────────────────────────────────
@@ -505,22 +541,71 @@ class ANSITerminal(tk.Frame):
             self.input_field.focus_set()
 
     def _setup_drag_drop(self):
-        """Enable drag-and-drop for PDF files on macOS.
+        """Enable drag-and-drop for PDF files on macOS."""
+        if not DRAG_DROP_AVAILABLE:
+            # Fallback: detect macOS brace format via StringVar trace
+            # (already set up in __init__ with self._input_var.trace_add)
+            return
 
-        The StringVar trace on self._input_var automatically detects
-        any changes to the input field, including drag-and-drop.
+        # Register multiple widgets as drop targets so users can drop anywhere!
+        self.input_field.drop_target_register(DND_FILES)
+        self.text.drop_target_register(DND_FILES)
+        self.input_frame.drop_target_register(DND_FILES)
+
+        # Bind the drop event to all drop targets
+        self.input_field.dnd_bind('<<Drop>>', self._on_drop)
+        self.text.dnd_bind('<<Drop>>', self._on_drop)
+        self.input_frame.dnd_bind('<<Drop>>', self._on_drop)
+
+    def _on_drop(self, event):
+        """Handle files dropped onto the input field."""
+        # event.data contains the file paths
+        # On macOS, they come in brace format: {/path/file1.pdf} {/path/file2.pdf}
+        files = self._parse_drop_data(event.data)
+
+        if files:
+            # Quote all paths properly for TUI's shlex.split()
+            quoted_paths = ' '.join(shlex.quote(f) for f in files)
+
+            # Get current content
+            current = self.input_field.get()
+            if current:
+                # Append to existing text with space
+                self.input_field.insert(tk.END, ' ' + quoted_paths)
+            else:
+                # Replace empty field
+                self.input_field.delete(0, tk.END)
+                self.input_field.insert(0, quoted_paths)
+
+            self.input_field.focus_set()
+
+        # Prevent default handling
+        return 'break'
+
+    def _parse_drop_data(self, data):
+        """Parse file paths from drop event data.
+
+        On macOS/Linux: {/path/file1.pdf} {/path/file2.pdf}
+        On Windows: {C:/path/file1.pdf} {C:/path/file2.pdf}
         """
-        # Note: The actual drag-and-drop detection happens in _on_input_change()
-        # which is triggered by the StringVar trace set up in __init__
-        pass
+        # Extract paths from brace format
+        brace_pattern = r'\{([^}]+)\}'
+        paths = re.findall(brace_pattern, data)
+
+        if not paths:
+            # Fallback: try splitting by whitespace
+            paths = data.split()
+
+        return [p.strip() for p in paths if p.strip()]
 
     def _on_input_change(self):
         """Called automatically when input field content changes (via StringVar trace)."""
-        # Check for macOS drag-and-drop brace format immediately
-        content = self.input_field.get()
-        if '{' in content and '}' in content:
-            # Schedule processing after current event completes
-            self.after(1, self._process_dropped_paths)
+        # Check for macOS drag-and-drop brace format (fallback for when tkinterdnd2 isn't available)
+        if not DRAG_DROP_AVAILABLE:
+            content = self.input_field.get()
+            if '{' in content and '}' in content:
+                # Schedule processing after current event completes
+                self.after(1, self._process_dropped_paths)
 
     def _process_dropped_paths(self):
         """Process paths that were pasted or dragged into the input field.
@@ -713,7 +798,12 @@ class RoboStripperApp:
     """Main GUI application window."""
 
     def __init__(self):
-        self.root = tk.Tk()
+        # Use TkinterDnD if available for drag-and-drop support
+        if DRAG_DROP_AVAILABLE:
+            self.root = TkinterDnD.Tk()
+        else:
+            self.root = tk.Tk()
+
         self.root.title('RoboStripper 👠✨💅')
         # Narrower window for cunty mode - centered text blocks
         self.root.geometry('620x700')
