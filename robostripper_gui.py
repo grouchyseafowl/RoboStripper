@@ -18,6 +18,7 @@ Architecture:
 
 import os
 import re
+import shlex
 import sys
 import queue
 import threading
@@ -166,6 +167,11 @@ class ANSITerminal(tk.Frame):
 
         # Input frame at bottom (no visible prompt - robostripper prints its own)
         self.input_frame = tk.Frame(self, bg=BG_COLOR)
+
+        # Create a StringVar to track input field changes
+        self._input_var = tk.StringVar()
+        self._input_var.trace_add('write', lambda *args: self._on_input_change())
+
         self.input_field = tk.Entry(
             self.input_frame,
             bg='#0a0a0a',  # Slightly lighter black
@@ -176,6 +182,7 @@ class ANSITerminal(tk.Frame):
             highlightthickness=1,
             highlightcolor='#333333',
             highlightbackground='#1a1a1a',
+            textvariable=self._input_var,
         )
 
         # Get current profile to style the button
@@ -483,48 +490,71 @@ class ANSITerminal(tk.Frame):
             ]
         )
         if file_paths:
+            # Properly quote paths for shlex.split() in TUI
+            quoted_paths = ' '.join(shlex.quote(str(p)) for p in file_paths)
+
             # Insert file paths into input field
             current = self.input_field.get()
             if current:
                 # Append to existing text with space
-                self.input_field.insert(tk.END, ' ' + ' '.join(file_paths))
+                self.input_field.insert(tk.END, ' ' + quoted_paths)
             else:
                 # Replace empty field
                 self.input_field.delete(0, tk.END)
-                self.input_field.insert(0, ' '.join(file_paths))
+                self.input_field.insert(0, quoted_paths)
             self.input_field.focus_set()
 
     def _setup_drag_drop(self):
-        """Enable drag-and-drop for PDF files on macOS."""
-        # On macOS, tkinter has a special event for drag-and-drop
-        # When files are dragged onto the window, they appear as a <<Drop>> event
-        # However, this requires tkinterdnd2 package for full support
+        """Enable drag-and-drop for PDF files on macOS.
 
-        # For now, we'll make the input field accept dropped text (file paths)
-        # When you drag files onto macOS tkinter Entry widget, it auto-pastes the paths
-        # This works out of the box on macOS!
+        The StringVar trace on self._input_var automatically detects
+        any changes to the input field, including drag-and-drop.
+        """
+        # Note: The actual drag-and-drop detection happens in _on_input_change()
+        # which is triggered by the StringVar trace set up in __init__
+        pass
 
-        # Just make sure the input field is ready to receive drops
-        # The Entry widget on macOS automatically handles file drops as text paste
-
-        # We can also detect when text is pasted/dropped and clean it up
-        def on_paste(event=None):
-            # Get pasted content after a short delay (let the paste happen first)
-            self.after(10, self._clean_pasted_paths)
-
-        self.input_field.bind('<<Paste>>', on_paste)
-        # Also handle Command+V explicitly
-        self.input_field.bind('<Command-v>', on_paste)
-
-    def _clean_pasted_paths(self):
-        """Clean up file paths that were pasted/dropped."""
+    def _on_input_change(self):
+        """Called automatically when input field content changes (via StringVar trace)."""
+        # Check for macOS drag-and-drop brace format immediately
         content = self.input_field.get()
-        if content:
-            # Remove quotes and clean up paths
-            # macOS often adds quotes around paths with spaces
-            content = content.replace("'", "").replace('"', '')
-            self.input_field.delete(0, tk.END)
-            self.input_field.insert(0, content)
+        if '{' in content and '}' in content:
+            # Schedule processing after current event completes
+            self.after(1, self._process_dropped_paths)
+
+    def _process_dropped_paths(self):
+        """Process paths that were pasted or dragged into the input field.
+
+        Handles two formats:
+        1. macOS drag-and-drop: {/path/file1.pdf} {/path with spaces/file2.pdf}
+        2. Manual paste: /path/file1.pdf or "/path with spaces/file2.pdf"
+
+        Converts both to shlex-compatible quoted format.
+        """
+        content = self.input_field.get().strip()
+        if not content:
+            return
+
+        # Check for macOS brace format: {/path/file.pdf}
+        brace_pattern = r'\{([^}]+)\}'
+        brace_matches = re.findall(brace_pattern, content)
+
+        if brace_matches:
+            # macOS drag-and-drop detected
+            paths = brace_matches
+        else:
+            # Manual paste or typed input
+            try:
+                paths = shlex.split(content)
+            except ValueError:
+                paths = content.split()
+
+        # Re-quote all paths properly for TUI's shlex.split()
+        quoted_paths = ' '.join(shlex.quote(p) for p in paths)
+
+        # Replace input field with properly quoted paths
+        self.input_field.delete(0, tk.END)
+        self.input_field.insert(0, quoted_paths)
 
     def _poll_output(self):
         """Poll the output queue and render text."""
