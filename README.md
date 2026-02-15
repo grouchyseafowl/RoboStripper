@@ -8,6 +8,22 @@ Removes repetitive headers, footers, copyright stamps, download timestamps, and 
 
 ## 📥 Download
 
+### Stopgap TUI (All OS) — Double‑Click Launchers (No Terminal Needed)
+
+This is the fastest path while the GUI is being cleaned up. It runs the **TUI**.
+
+1. Go to [**Releases**](../../releases/latest)
+2. Download `RoboStripper.zip`
+3. Unzip it anywhere (Desktop is fine)
+4. Double‑click the launcher for your OS:
+   - **Mac**: `RoboStripper.command`
+   - **Windows**: `RoboStripper.bat`
+   - **Linux**: `RoboStripper.sh`
+
+If you don’t have Python installed, the launcher will open python.org and walk you through it.
+
+---
+
 ### For Mac Users
 
 1. Go to [**Releases**](../../releases/latest)

@@ -131,9 +131,12 @@ BOLD = "\033[1m" if USE_COLOR else ""
 DIM = "\033[2m" if USE_COLOR else ""
 R = "\033[0m" if USE_COLOR else ""
 
-# Output directory — lives next to this script
+# Output directory — keep writable for app bundles
 SCRIPT_DIR = Path(__file__).resolve().parent
-OUTPUT_DIR = SCRIPT_DIR / "StrippedText"
+if getattr(sys, 'frozen', False):
+    OUTPUT_DIR = Path.home() / "StrippedText"
+else:
+    OUTPUT_DIR = SCRIPT_DIR / "StrippedText"
 
 
 # ── Dependency Check & Auto-Install ──────────────────────────────────────────
@@ -221,7 +224,7 @@ def check_and_install_deps():
         print(f"  {CYAN}Installing...{R}")
         try:
             subprocess.check_call(
-                [sys.executable, "-m", "pip", "install"] + missing,
+                [sys.executable, "-m", "pip", "install", "--user", "--break-system-packages"] + missing,
                 stdout=subprocess.DEVNULL if not sys.stdout.isatty() else None,
             )
         except subprocess.CalledProcessError:
@@ -238,7 +241,7 @@ def check_and_install_deps():
         gray_spinner(0.5, "📄 Completing paperwork...")
         try:
             subprocess.check_call(
-                [sys.executable, "-m", "pip", "install"] + missing,
+                [sys.executable, "-m", "pip", "install", "--user", "--break-system-packages"] + missing,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
@@ -267,10 +270,14 @@ def check_tesseract() -> bool:
         return False
 
 
-# Run dependency check before importing
-check_and_install_deps()
+# Run dependency check before importing (skip in GUI mode — GUI handles it in main())
+if not os.environ.get('ROBOSTRIPPER_GUI_MODE'):
+    check_and_install_deps()
 
-import fitz  # pymupdf  # noqa: E402
+try:
+    import fitz  # pymupdf  # noqa: E402
+except ImportError:
+    fitz = None  # Will be available after check_and_install_deps() in main()
 
 try:
     import pytesseract  # noqa: E402
@@ -804,6 +811,11 @@ def check_cleanup() -> None:
 
     print()
 
+    # After user responds to cleanup, clear screen
+    # This removes the cleanup prompt and prepares for main menu
+    if txt_files:  # Only if cleanup prompt was shown
+        clear_screen()
+
 
 # ── UI Functions ─────────────────────────────────────────────────────────────
 
@@ -838,12 +850,24 @@ def resize_terminal():
         pass  # Silent fail if terminal doesn't support resizing
 
 
-def print_banner(first_time=True):
+def clear_screen():
+    """Clear the terminal screen using ANSI codes."""
+    print("\033[2J\033[H", end="", flush=True)
+
+
+def clear_and_show_header():
+    """Clear screen and redisplay banner (without fluorescent joke)."""
+    clear_screen()
+    print_banner(first_time=False)
+
+
+def print_banner(first_time=True, header_only=False):
     """Print the welcome banner (profile-aware).
 
     Args:
         first_time: If True, show fluorescent lighting joke in normie mode.
                    If False, skip the joke and show banner directly.
+        header_only: If True, only show title/border, skip all content.
     """
     global P, CURRENT_PROFILE
     P = PROFILES[CURRENT_PROFILE]  # Refresh in case profile changed
@@ -857,9 +881,15 @@ def print_banner(first_time=True):
         # ═══════════════════════════════════════════════════════════
         # Elegant high-femme title treatment with borders
         print(f"{MAGENTA}{'─' * 71}{R}")
-        print(f"{BOLD}{MAGENTA}               👠✨💅  R O B O S T R I P P E R  💅✨👠{R}")
+        print(f"{BOLD}{MAGENTA}              👠✨💅  R O B O S T R I P P E R  💅✨👠 {R}")
         print(f"{MAGENTA}{'─' * 71}{R}")
         print("")
+
+        # Skip content if header_only mode
+        if header_only:
+            return
+
+        # Show full content
         print(f"         {PINK}Hey love!{R} {DIM}I'm your friendly neighborhood {R}{WHITE}RoboStripper!{R}")
         print("")
         print(f"  {DIM}I strip {R}{PINK}metadata{R}{DIM} from your PDFs so{R} {CYAN}RoboBraille{R} {DIM}and{R} {CYAN}screen readers{R} {R}")
@@ -908,14 +938,20 @@ def print_banner(first_time=True):
         print(f"  {DIM}─────────────────────────────────────────────────────────────────────────────────────────{R}")
         print("")
 
+        # Skip content if header_only mode
+        if header_only:
+            return
+
         # Only show fluorescent lighting joke on first banner display
         if first_time:
             print(f"  Sorry, I can't concentrate without more fluorescent lighting.")
             print()
-            gray_spinner(1.0, "Consulting management re: adjusting fluorescent lighting levels...")
-            gray_spinner(1.2, "Consulting management's management re: adjusting fluorescent lighting levels...")
-            gray_spinner(0.5, "Adjusting fluorescent lighting levels...")
-            gray_spinner(0.8, "Completing paperwork re: adjusting fluorescent lighting levels...")
+            gray_spinner(2.5, "📋 Submitting Form FL-001: Request for Fluorescent Lighting Adjustment...")
+            gray_spinner(2.8, "⏳ Awaiting approval from Lighting Adjustment Supervisor...")
+            gray_spinner(3.2, "🏢 Escalating to Lighting Adjustment Supervisor's Supervisor...")
+            gray_spinner(2.0, "📊 Consulting corporate lighting policy manual (1,847 pages)...")
+            gray_spinner(2.5, "💡 Adjusting fluorescent lighting levels by 0.003%...")
+            gray_spinner(1.8, "📄 Completing mandatory post-adjustment documentation...")
             print()
             print(f"  {WHITE}Whew, much better. Ready when you are. Hit Enter to continue.{R}")
             # Pause after the fluorescent lighting joke so user can see nothing changed
@@ -944,7 +980,7 @@ def print_banner(first_time=True):
             print("")
 
         # Main content (always shown)
-        print(f"  Despite my name, there will be no innuendo or silliness whatsoever.")
+        print(f"  {DIM}Despite my name, there will be no innuendo or silliness whatsoever.{R}")
         print()
         print(f"  NOTICE: {DIM}This application processes PDF documents to remove extraneous header and footer{R}")
         print(f"  {DIM}information for using {R}RoboBraille {DIM}and {R}screen readers{DIM}.{R}")
@@ -1042,32 +1078,35 @@ def gray_spinner_with_task(task_func, message: str = ""):
 
 
 def fade_to_boring():
-    """Fade colors out when switching to normie mode - drain the soul."""
+    """Full-screen fade: drain color from entire interface when switching to normie."""
     import time
     import datetime
 
-    # Gradual color fade: vivid magenta → dim gray (draining the color away)
-    messages = [
-        ("  ● Draining color from interface...", "\033[95m", 1.0),           # Bright Magenta
-        ("  ● Removing joy from user experience...", "\033[35m", 0.8),       # Magenta
-        ("  ● Extracting enthusiasm from system...", "\033[2m\033[95m", 0.0), # Dim Bright Magenta
-        ("  ● Neutralizing personality components...", "\033[2m\033[35m", 1.2), # Dim Magenta
-        ("  ● Converting to bleh mode...", "\033[90m", 0.8),                 # Dark Gray
-        ("  ● Launching faceless bureaucracies...", "\033[2m\033[90m", 1.0), # Dim Dark Gray
-        ("  ● Initializing soul extraction protocol...", "\033[2m", 1.1),    # Just Dim
-        ("  ● Finalizing transformation to void...", "\033[2m\033[90m", 0.7), # Final dim gray
+    # Gradual color fade through multiple full-screen frames
+    frames = [
+        ("\033[95m", "● Draining color from interface...", 1.5),
+        ("\033[35m", "● Removing joy from user experience...", 1.5),
+        ("\033[2m\033[95m", "● Extracting enthusiasm from system...", 1.2),
+        ("\033[2m\033[35m", "● Neutralizing personality components...", 1.8),
+        ("\033[90m", "● Converting to bleh mode...", 1.5),
+        ("\033[2m\033[90m", "● Launching faceless bureaucracies...", 1.8),
+        ("\033[2m", "● Initializing soul extraction protocol...", 2.0),
+        ("\033[2m\033[90m", "● Finalizing transformation to void...", 1.5),
     ]
 
-    for msg, color, delay in messages:
-        print(f"\033[2K\r{color}{msg}{R}", end="", flush=True)
+    for color, message, delay in frames:
+        print("\033[2J\033[H", end="", flush=True)
+        print("\n" * 10)
+        print(f"  {color}{message}{R}", flush=True)
         time.sleep(delay)
 
-    print()
-    print()
+    # Final completion screen
+    print("\033[2J\033[H", end="", flush=True)
+    print("\n" * 8)
     print(f"  Welcome, fellow coworker. Let's do paperwork until 5 PM. 🏢 👔 📁{R}")
     print(f"  ✓ NORMIE mode activated.{R}")
     print(f"  ✓ Soul successfully extracted and archived.{R}")
-    print(f"Reference Code: VOID-{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}{R}")
+    print(f"  Reference Code: VOID-{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}{R}")
     print()
 
     # Pause so user can absorb the soul-crushing transition
@@ -1108,25 +1147,28 @@ def switch_profile():
         print(f"  {BOLD}FINALLY.{R} Thank {BOLD}god 💅{R}")
         print()
 
-        # Reverse fade - colors rushing back in (gradual: dim gray → vivid magenta)
-        fade_colors_reverse = [
-            "\033[2m\033[90m",   # Dim dark gray (starting from void)
-            "\033[2m",           # Just dim (less gray)
-            "\033[90m",          # Dark gray (getting lighter)
-            "\033[2m\033[35m",   # Dim magenta (color emerging!)
-            "\033[35m",          # Magenta (more color)
-            "\033[2m\033[95m",   # Dim bright magenta (almost there)
-            "\033[95m",          # Bright magenta (vibrant!)
-            "\033[95m\033[1m",   # Bold bright magenta (MAXIMUM COLOR!)
+        # Reverse fade - colors rushing back in (full screen transition)
+        frames = [
+            ("\033[2m\033[90m", "● Restoring color and personality...", 0.8),
+            ("\033[2m", "● Reactivating joy protocols...", 0.8),
+            ("\033[90m", "● Color emergence detected...", 0.7),
+            ("\033[2m\033[35m", "● Personality restoration in progress...", 0.9),
+            ("\033[35m", "● Enthusiasm levels rising...", 0.7),
+            ("\033[2m\033[95m", "● Fabulous mode initializing...", 0.8),
+            ("\033[95m", "● Maximum color achieved...", 0.7),
+            ("\033[95m\033[1m", "● ✨ GLAMOUR RESTORED ✨", 1.0),
         ]
 
-        message = "  ● Restoring color and personality to interface..."
+        for color, message, delay in frames:
+            print("\033[2J\033[H", end="", flush=True)
+            print("\n" * 10)
+            print(f"  {color}{message}{R}", flush=True)
+            time.sleep(delay)
 
-        for color in fade_colors_reverse:
-            print(f"\033[2K\r{color}{message}{R}", end="", flush=True)
-            time.sleep(0.25)
-
-        print(f"\033[2K\r  {MAGENTA}✨ Welcome back, babe! 💅{R}")
+        # Final celebration
+        print("\033[2J\033[H", end="", flush=True)
+        print("\n" * 10)
+        print(f"  {MAGENTA}✨ Welcome back, babe! 💅{R}")
         print()
 
         # Pause so user can enjoy the moment
@@ -1144,22 +1186,33 @@ def switch_profile():
 
     # Clear screen and reprint banner
     # Show fluorescent joke if we just switched TO normie mode
-    print("\033[2J\033[H", end="")  # ANSI clear screen
+    print("\033[2J\033[H", end="", flush=True)  # ANSI clear screen
+    time.sleep(0.05)  # Brief pause to ensure clear completes
     show_fluorescent_joke = (CURRENT_PROFILE == "normie")
     print_banner(first_time=show_fluorescent_joke)
 
 
-def pick_files(show_initial_banner=True) -> list[Path]:
+def pick_files(show_initial_banner=True, is_first_launch=True) -> list[Path]:
     """Prompt user to drag-and-drop PDF files into the terminal.
 
     Args:
         show_initial_banner: If False, skip the initial banner (e.g., after profile switch)
+        is_first_launch: If True, show fluorescent joke in normie mode after cleanup
     """
+    # Show banner for first time (or after profile switch)
     if show_initial_banner:
-        print_banner()
+        # Show just the header/title (no main menu content yet)
+        print_banner(header_only=True)
 
-    # Check for old output files
-    check_cleanup()
+        # Check for old files (shows cleanup prompt after header)
+        check_cleanup()
+
+        # Always clear screen to remove header_only banner
+        clear_screen()
+
+        # Show full banner with main menu content
+        # Include fluorescent joke only on first launch
+        print_banner(first_time=is_first_launch)
 
     # Loop until we get valid files
     while True:
@@ -1188,7 +1241,7 @@ def pick_files(show_initial_banner=True) -> list[Path]:
             print(f"  NOTE: {DIM}Submitted files must be PDF format. Other formats will be rejected and returned to{R}")
             print(f"  {DIM}sender. Average processing time: 30 seconds to 8 weeks per file, subject to system load.{R}")
             print()
-            print(f"  NOTICE: ⚠️  {DIM}EXPECT DELAYS ⚠️{R}")
+            print(f"  NOTICE: ⚠️ {DIM}EXPECT DELAYS ⚠️{R}")
 
         print()
 
@@ -1230,7 +1283,10 @@ def pick_files(show_initial_banner=True) -> list[Path]:
         # Check for quit command
         if raw.lower() in ('quit', 'exit', 'q'):
             print(f"\n  {P['goodbye']}\n{R}")
-            sys.exit(0)
+            if os.environ.get('ROBOSTRIPPER_GUI_MODE'):
+                os._exit(0)  # Terminate entire process including GUI
+            else:
+                sys.exit(0)  # Normal exit for TUI
 
         # Check for profile switch command
         if raw.lower() == 'profile':
@@ -1438,7 +1494,7 @@ def print_summary(output_files: list[Path], args):
     if CURRENT_PROFILE == "cunty":
         # CUNTY PROFILE: Celebratory summary
         print(f"  {MAGENTA}┌─────────────────────────────────────────────────┐{R}")
-        print(f"  {MAGENTA}│{R}  {GREEN}✨ {n} file{'s' if n != 1 else ' '} stripped clean!{R}                       {MAGENTA}│{R}")
+        print(f"  {MAGENTA}│{R}  {GREEN}✨ {n} file{'s' if n != 1 else ' '} stripped clean!{R}                     {MAGENTA}│{R}")
         print(f"  {MAGENTA}└─────────────────────────────────────────────────┘{R}")
         print()
         for f in output_files:
@@ -1475,7 +1531,7 @@ def print_summary(output_files: list[Path], args):
         # CUNTY PROFILE: Helpful and friendly
         if copy_to_clipboard(filename):
             print(f"\n    {GREEN}📋 \"{filename}\" copied to clipboard{R}")
-            print(f"       {DIM}Paste into the search bar in RoboBraille's file picker{R}")
+            print(f"    {DIM}Paste into the search bar in RoboBraille's file picker{R}")
 
         if not args.no_open and not args.preview:
             print()
@@ -1773,6 +1829,23 @@ def check_for_updates(github_user: str = "june-alice-blue", repo: str = "RoboStr
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 def main():
+    # In GUI mode, dep check was deferred from import time to here
+    # (so stdin/stdout are already redirected to the terminal widget)
+    global fitz, OCR_AVAILABLE, TESSERACT_INSTALLED
+    if os.environ.get('ROBOSTRIPPER_GUI_MODE'):
+        check_and_install_deps()
+        # Re-import deps that may have just been installed
+        if fitz is None:
+            import fitz  # noqa: F811
+        try:
+            import pytesseract  # noqa: F811
+            from PIL import Image  # noqa: F811
+            TESSERACT_INSTALLED = check_tesseract()
+            OCR_AVAILABLE = TESSERACT_INSTALLED
+        except ImportError:
+            OCR_AVAILABLE = False
+            TESSERACT_INSTALLED = False
+
     parser = argparse.ArgumentParser(
         description="RoboStripper 👠✨💅 — strip metadata from scholarly PDFs for RoboBraille",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -1819,15 +1892,64 @@ Examples:
 
     output_files = []
 
-    # Interactive mode
+    # Interactive mode - loop back to menu after processing
     if args.input is None:
-        pdf_files = pick_files()
-        n = len(pdf_files)
-        print(f"\n  {MAGENTA}👠{R} {n} file{'s' if n != 1 else ''} on the stage. {BOLD}Let's work.{R} 👠\n{R}")
-        for pdf_path in pdf_files:
-            result = process_file(pdf_path, None, args.preview, args.faithful, args.verbose)
-            if result:
-                output_files.append(result)
+        first_iteration = True
+        while True:
+            # Pick files (show initial banner only on first iteration)
+            pdf_files = pick_files(show_initial_banner=first_iteration, is_first_launch=first_iteration)
+            first_iteration = False  # Subsequent iterations skip initial banner setup
+
+            # Clear screen for clean processing view
+            clear_screen()
+
+            # Show minimal header for context
+            if CURRENT_PROFILE == "cunty":
+                print(f"{MAGENTA}{'─' * 71}{R}")
+                print(f"{BOLD}{MAGENTA}              👠✨💅  R O B O S T R I P P E R  💅✨👠 {R}")
+                print(f"{MAGENTA}{'─' * 71}{R}")
+            else:
+                print(f"  ┌───────────────────────────────────────────────────────────────────────────────────────┐")
+                print(f"  │               {BOLD}🏢 👔 📁 R O B O S T R I P P E R  v{VERSION} 📁 👔 🏢{R}                       │")
+                print(f"  └───────────────────────────────────────────────────────────────────────────────────────┘")
+
+            n = len(pdf_files)
+            print(f"\n  {MAGENTA}👠{R} {n} file{'s' if n != 1 else ''} on the stage. {BOLD}Let's work.{R} 👠\n{R}")
+
+            output_files = []
+            for pdf_path in pdf_files:
+                result = process_file(pdf_path, None, args.preview, args.faithful, args.verbose)
+                if result:
+                    output_files.append(result)
+
+            # Show summary
+            print_summary(output_files, args)
+
+            # Prompt to continue or quit
+            print()
+            if CURRENT_PROFILE == "cunty":
+                print(f"  {MAGENTA}· · · ✦ · · ·{R}")
+            else:
+                print(f"  {DIM}─────────────────────────────────────────────────{R}")
+            print()
+
+            try:
+                response = input(f"  {DIM}Press Enter to continue (or type 'quit')...{R} ").strip().lower()
+                if response in ('quit', 'exit', 'q'):
+                    print(f"\n  {P['goodbye']}\n{R}")
+                    if os.environ.get('ROBOSTRIPPER_GUI_MODE'):
+                        os._exit(0)  # Close GUI window
+                    else:
+                        sys.exit(0)
+            except (EOFError, KeyboardInterrupt):
+                print(f"\n  {P['goodbye']}\n{R}")
+                if os.environ.get('ROBOSTRIPPER_GUI_MODE'):
+                    os._exit(0)
+                else:
+                    sys.exit(0)
+
+            # Clear screen and return to main menu
+            clear_and_show_header()
 
     # Single file
     elif args.input.is_file():

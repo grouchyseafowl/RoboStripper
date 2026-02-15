@@ -7,13 +7,13 @@ echo "🏗️  Building RoboStripper for Mac..."
 echo "🧹 Cleaning previous builds..."
 rm -rf build dist
 
-# Build with PyInstaller (creates .app bundle with GUI that shows our icon!)
+# Build with PyInstaller (TUI app; opens in Terminal)
 echo "📦 Building .app bundle..."
 pyinstaller \
-  --name "RoboStripper" \
-  --windowed \
-  --icon assets/robostripper_icon.icns \
-  robostripper_gui.py
+    --name "RoboStripper" \
+    --console \
+    --icon assets/robostripper_icon.icns \
+    robostripper.py
 
 # Clean the .app bundle
 echo "🧹 Cleaning .app bundle..."
@@ -21,7 +21,7 @@ xattr -cr "dist/RoboStripper.app" 2>/dev/null || true
 find "dist/RoboStripper.app" -name "._*" -delete 2>/dev/null || true
 find "dist/RoboStripper.app" -name ".DS_Store" -delete 2>/dev/null || true
 
-echo "✨ GUI app with sexy icon ready!"
+echo "✨ TUI app with sexy icon ready!"
 
 # Create DMG staging area
 echo "💿 Creating DMG..."

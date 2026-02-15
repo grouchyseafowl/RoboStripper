@@ -20,12 +20,12 @@
    ```
 
 This creates:
-- `dist/RoboStripper.app` - Standalone application
+- `dist/RoboStripper.app` - Standalone application (TUI, opens in Terminal)
 - `dist/RoboStripper.dmg` - Professional installer (176MB)
 
 ### What the Build Does
 
-1. ✅ Builds .app bundle with PyInstaller
+1. ✅ Builds .app bundle with PyInstaller (TUI)
 2. ✅ Cleans extended attributes
 3. ✅ Ad-hoc code signs the app (prevents "damaged" error)
 4. ✅ Creates professional DMG with:

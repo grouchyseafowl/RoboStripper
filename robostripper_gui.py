@@ -66,7 +66,8 @@ if DRAG_DROP_AVAILABLE:
 # ── ANSI Color Map ───────────────────────────────────────────────────────────
 # Maps ANSI SGR codes to (foreground, bold, dim) properties
 
-ANSI_COLORS = {
+# Cunty mode: vibrant, fabulous colors
+ANSI_COLORS_CUNTY = {
     # Standard foreground
     30: '#4D4D4D',   # Black
     31: '#FF5555',   # Red
@@ -88,8 +89,38 @@ ANSI_COLORS = {
     97: '#E8D4A0',   # Champagne gold (WHITE - matches CYAN)
 }
 
+# Normie mode: corporate grey, muted colors (DMV office vibes)
+ANSI_COLORS_NORMIE = {
+    # Standard foreground
+    30: '#3a3a3a',   # Black -> dark grey
+    31: '#8a8a8a',   # Red -> medium grey
+    32: '#9a9a9a',   # Green -> light grey
+    33: '#888888',   # Yellow -> muted grey
+    34: '#6a6a6a',   # Blue -> grey
+    35: '#7a7a7a',   # Magenta -> grey (NO PINK!)
+    36: '#8a8a8a',   # Cyan -> grey (no champagne!)
+    37: '#9a9a9a',   # White -> light grey
+
+    # Bright/high-intensity foreground
+    90: '#5a5a5a',   # Bright Black -> slightly lighter grey
+    91: '#888888',   # Bright Red -> grey
+    92: '#8a8a8a',   # Bright Green -> grey
+    93: '#888888',   # Bright Yellow -> grey
+    94: '#7a7a7a',   # Bright Blue -> grey (commands still grey)
+    95: '#7a7a7a',   # Bright Magenta -> grey
+    96: '#8a8a8a',   # Bright Cyan -> grey
+    97: '#9a9a9a',   # Bright White -> light grey
+}
+
+# Active color map (will be switched dynamically)
+ANSI_COLORS = ANSI_COLORS_CUNTY.copy()
+
+# Profile-aware default foreground
+DEFAULT_FG_CUNTY = '#E8D4A0'  # Champagne gold
+DEFAULT_FG_NORMIE = '#888888'  # Corporate grey
+DEFAULT_FG = DEFAULT_FG_CUNTY  # Will be updated dynamically
+
 BG_COLOR = '#000000'        # Pure black
-DEFAULT_FG = '#E8D4A0'      # Champagne gold
 DIM_MULTIPLIER = 0.55        # How much to dim text
 
 
@@ -259,6 +290,16 @@ class ANSITerminal(tk.Frame):
             **button_config
         )
 
+        # Track profile changes for dynamic updates
+        from pathlib import Path
+        self._current_profile = current_profile
+        self._profile_config_path = Path.home() / ".robostripper" / "config.json"
+        self._profile_mtime = self._profile_config_path.stat().st_mtime if self._profile_config_path.exists() else 0
+
+        # ANSI state
+        self._ansi_state = ANSIState()
+        self._tag_cache = {}
+
         # Layout
         self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.text.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
@@ -277,18 +318,19 @@ class ANSITerminal(tk.Frame):
         self.input_queue = queue.Queue()
         self._input_ready = threading.Event()
 
-        # ANSI state
-        self._ansi_state = ANSIState()
-        self._tag_cache = {}
-
         # Current line buffer for \r handling
         self._current_line_start = None
 
-        # Header background tag for title section - ultra dark purple
-        self.text.tag_configure('header_bg', background='#1A0B2E')  # Ultra deep, almost black purple
+        # Header background tag for title section - profile-aware
+        # Cunty: ultra dark purple, Normie: pure black (soulless)
+        header_bg_color = '#1A0B2E' if current_profile == 'cunty' else '#000000'
+        self.text.tag_configure('header_bg', background=header_bg_color)
         self.text.tag_lower('header_bg')  # Ensure header_bg is below other tags
         self._in_header = False  # Track if we're still in the header section
         self._header_line_count = 0
+
+        # Load initial colors for current profile
+        self._reconfigure_colors_for_profile(current_profile)
 
         # Start output polling
         self._poll_output()
@@ -301,8 +343,33 @@ class ANSITerminal(tk.Frame):
         normal_font = tkfont.Font(family=family, size=size, weight='normal')
         bold_font = tkfont.Font(family=family, size=size, weight='bold')
 
-        # TWO FONTS: Script for R/S, runway editorial for the rest
+        # Store base font info for profile switching
+        self._base_font_family = family
+        self._base_font_size = size
 
+        # Initialize cunty fonts (glamorous!)
+        self._init_cunty_fonts(family, size)
+
+        # Initialize normie fonts (soul-crushing!)
+        self._init_normie_fonts(family, size)
+
+        # Set active fonts based on current profile
+        if self._current_profile == 'cunty':
+            self._activate_cunty_fonts()
+        else:
+            self._activate_normie_fonts()
+
+        self.text.configure(font=normal_font)
+        self.input_field.configure(font=normal_font)
+        self._normal_font = normal_font
+        self._bold_font = bold_font
+
+        # Now that fonts are initialized, apply them to any existing title tags
+        # (This handles the case where set_font() is called after __init__)
+        self._apply_profile_fonts()
+
+    def _init_cunty_fonts(self, family, size):
+        """Initialize glamorous cunty mode fonts."""
         # Font 1: GLAMOROUS SCRIPT for R and S (Zapfino first for that perfect R!)
         script_fonts = [
             'Zapfino',              # Flowing script - MAXIMUM GLAMOUR, perfect R
@@ -337,30 +404,70 @@ class ANSITerminal(tk.Frame):
                 runway_family = font_name
                 break
 
-        # Regular runway font for O B O / T R I P P E R
-        self._title_font = tkfont.Font(family=runway_family, size=size+3, weight='bold')
+        # Cunty fonts - glamorous and fabulous!
+        self._title_font_cunty = tkfont.Font(family=runway_family, size=size+3, weight='bold')
+        self._title_font_r_cunty = tkfont.Font(family=script_family, size=size+7, weight='bold')
+        self._title_font_s_cunty = tkfont.Font(family=script_family, size=size+7, weight='bold')
 
-        # LARGE glamorous R (Zapfino - you love this one!)
-        self._title_font_r = tkfont.Font(family=script_family, size=size+7, weight='bold')
-
-        # S uses same font as R (Zapfino)
-        s_fonts = [
-            'Zapfino',              # Same as R - consistent look
+    def _init_normie_fonts(self, family, size):
+        """Initialize soul-crushing normie mode fonts."""
+        # NORMIE FONTS: Corporate, boring, Arial/Helvetica hell
+        normie_fonts = [
+            'Arial',                # Peak corporate boredom
+            'Helvetica',            # Swiss neutrality (yawn)
+            'Helvetica Neue',       # Still boring
+            'Geneva',               # Mac system font (meh)
+            'MS Sans Serif',        # Windows corporate hell
+            'Lucida Grande',        # Default Mac (uninspired)
         ]
 
-        s_family = script_family
-        for font_name in s_fonts:
+        normie_family = family
+        for font_name in normie_fonts:
             if font_name in tkfont.families():
-                s_family = font_name
+                normie_family = font_name
                 break
 
-        # S same size as R
-        self._title_font_s = tkfont.Font(family=s_family, size=size+7, weight='bold')
+        # Normie fonts - all the same size, all the same boring font
+        self._title_font_normie = tkfont.Font(family=normie_family, size=size, weight='normal')
+        self._title_font_r_normie = tkfont.Font(family=normie_family, size=size, weight='normal')
+        self._title_font_s_normie = tkfont.Font(family=normie_family, size=size, weight='normal')
 
-        self.text.configure(font=normal_font)
-        self.input_field.configure(font=normal_font)
-        self._normal_font = normal_font
-        self._bold_font = bold_font
+    def _activate_cunty_fonts(self):
+        """Switch to glamorous cunty fonts."""
+        self._title_font = self._title_font_cunty
+        self._title_font_r = self._title_font_r_cunty
+        self._title_font_s = self._title_font_s_cunty
+
+    def _activate_normie_fonts(self):
+        """Switch to boring normie fonts."""
+        self._title_font = self._title_font_normie
+        self._title_font_r = self._title_font_r_normie
+        self._title_font_s = self._title_font_s_normie
+
+    def _apply_profile_fonts(self):
+        """Apply current profile fonts to all existing title tags."""
+        if not hasattr(self, '_title_font'):
+            return  # Fonts not initialized yet
+
+        for tag_name in self.text.tag_names():
+            if '_title_' not in tag_name:
+                continue
+
+            try:
+                # Determine char type from tag name
+                if tag_name.endswith('_title_R'):
+                    new_font = self._title_font_r
+                elif tag_name.endswith('_title_S'):
+                    new_font = self._title_font_s
+                elif tag_name.endswith('_title_normal'):
+                    new_font = self._title_font
+                else:
+                    continue
+
+                # Reconfigure the tag with new font
+                self.text.tag_configure(tag_name, font=new_font)
+            except Exception:
+                pass
 
     def _get_or_create_tag(self, state):
         """Get or create a text tag for the given ANSI state."""
@@ -641,8 +748,119 @@ class ANSITerminal(tk.Frame):
         self.input_field.delete(0, tk.END)
         self.input_field.insert(0, quoted_paths)
 
+    def _check_profile_change(self):
+        """Check if profile changed and update UI if needed."""
+        if not self._profile_config_path.exists():
+            return
+
+        try:
+            current_mtime = self._profile_config_path.stat().st_mtime
+            if current_mtime > self._profile_mtime:
+                # Profile changed! Reload it
+                self._profile_mtime = current_mtime
+
+                import json
+                with open(self._profile_config_path) as f:
+                    config = json.load(f)
+                    new_profile = config.get("profile", "cunty")
+
+                if new_profile != self._current_profile:
+                    self._current_profile = new_profile
+                    self._update_button_style(new_profile)
+                    self._reconfigure_colors_for_profile(new_profile)
+        except Exception:
+            pass  # Silent fail if file read error
+
+    def _update_button_style(self, profile):
+        """Update attach button styling based on profile."""
+        if profile == 'cunty':
+            self.attach_button.config(
+                text='📎✨',
+                bg='#1A0B2E',
+                fg='#FF79C6',
+                activebackground='#2A1B3E',
+                activeforeground='#FF79C6'
+            )
+        else:  # normie
+            self.attach_button.config(
+                text='📎',
+                bg='#2a2a2a',
+                fg='#888888',
+                activebackground='#3a3a3a',
+                activeforeground='#888888'
+            )
+
+    def _reconfigure_colors_for_profile(self, profile):
+        """Reconfigure all terminal colors for new profile."""
+        global ANSI_COLORS, DEFAULT_FG
+
+        # Switch active color map
+        if profile == 'cunty':
+            ANSI_COLORS = ANSI_COLORS_CUNTY.copy()
+            DEFAULT_FG = DEFAULT_FG_CUNTY
+            new_palette = ANSI_COLORS_CUNTY
+            old_palette = ANSI_COLORS_NORMIE
+        else:  # normie
+            ANSI_COLORS = ANSI_COLORS_NORMIE.copy()
+            DEFAULT_FG = DEFAULT_FG_NORMIE
+            new_palette = ANSI_COLORS_NORMIE
+            old_palette = ANSI_COLORS_CUNTY
+
+        # Build color mapping: old_color -> new_color
+        color_map = {}
+        for code in old_palette:
+            if code in new_palette:
+                old_color = old_palette[code]
+                new_color = new_palette[code]
+                color_map[old_color] = new_color
+                # Also map dimmed versions
+                color_map[dim_color(old_color)] = dim_color(new_color)
+
+        # Reconfigure all existing tags
+        for tag_name in self.text.tag_names():
+            if not tag_name.startswith('ansi_'):
+                continue
+
+            # Get current foreground color
+            try:
+                current_fg = self.text.tag_cget(tag_name, 'foreground')
+
+                # Map to new color
+                new_fg = color_map.get(current_fg, current_fg)
+
+                # Reconfigure tag (this retroactively affects all text using this tag!)
+                if new_fg != current_fg:
+                    self.text.tag_configure(tag_name, foreground=new_fg)
+            except Exception:
+                pass  # Skip tags that don't have foreground color
+
+        # Update header background: purple in cunty, black in normie
+        header_bg_color = '#1A0B2E' if profile == 'cunty' else '#000000'
+        self.text.tag_configure('header_bg', background=header_bg_color)
+
+        # Switch title fonts: glamorous in cunty, boring in normie
+        # (Only if fonts have been initialized - set_font() is called after __init__)
+        if hasattr(self, '_title_font_cunty') and hasattr(self, '_title_font_normie'):
+            if profile == 'cunty':
+                self._activate_cunty_fonts()
+            else:
+                self._activate_normie_fonts()
+
+            # Apply the new fonts to all existing title tags
+            self._apply_profile_fonts()
+
+        # Update main text widget's default foreground and cursor
+        cursor_color = '#FF79C6' if profile == 'cunty' else '#666666'
+        self.text.config(fg=DEFAULT_FG, insertbackground=cursor_color)
+
+        # Update input field cursor and foreground color
+        self.input_field.config(insertbackground=cursor_color, fg=DEFAULT_FG)
+
     def _poll_output(self):
         """Poll the output queue and render text."""
+        # Check for profile changes every poll cycle (~60fps is fine for this)
+        self._check_profile_change()
+
         try:
             while True:
                 chunk = self.output_queue.get_nowait()
@@ -798,9 +1016,18 @@ class RoboStripperApp:
     """Main GUI application window."""
 
     def __init__(self):
+        global DRAG_DROP_AVAILABLE
+
         # Use TkinterDnD if available for drag-and-drop support
         if DRAG_DROP_AVAILABLE:
-            self.root = TkinterDnD.Tk()
+            try:
+                self.root = TkinterDnD.Tk()
+            except (RuntimeError, Exception) as e:
+                # Fall back if tkdnd native library fails to load (common on macOS Python 3.14)
+                print(f"  ⚠️  Drag-and-drop unavailable ({e})")
+                print("  📎 Using attach button instead!\n")
+                self.root = tk.Tk()
+                DRAG_DROP_AVAILABLE = False
         else:
             self.root = tk.Tk()
 
