@@ -192,9 +192,9 @@ def check_and_install_deps():
     else:
         # NORMIE PROFILE: Bureaucratic dependency installation
         print()
-        print(f"  {DIM}═════════════════════════════════════════════════════════════════════{R}")
+        print(f"  {DIM}══════════════════════════════════════════════════{R}")
         print(f"  INITIAL SETUP REQUIRED - Form RS-101{R}")
-        print(f"  {DIM}═════════════════════════════════════════════════════════════════════{R}")
+        print(f"  {DIM}══════════════════════════════════════════════════{R}")
         print()
         print(f"  {DIM}The following system dependencies must be installed before proceeding.{R}")
         print(f"  {DIM}Failure to install may result in application errors (Code: ERR-DEP-001):{R}")
@@ -581,7 +581,125 @@ def format_citation_header(citation: dict) -> str:
         parts.append(", ".join(source_date))
 
     header = "\n".join(parts)
-    return f"{header}\n\n{'—' * 40}\n\n"
+    return f"{header}\n\n---\n\n"
+
+
+def classify_page_blocks(page, body_size: float) -> str:
+    """
+    Re-assemble a page's text block by block, tagging non-body blocks
+    with sentinels so downstream processing can handle them semantically.
+
+    Sentinels inserted:
+      [BLOCKQUOTE] ... [/BLOCKQUOTE]  — indented block quote (smaller font)
+      [CAPTION] ... [/CAPTION]        — figure/photo caption (smaller font,
+                                        typically at page bottom or after image)
+
+    We use font size relative to the established body size to classify:
+      - body_size ± 0.5 pt  → normal body text (no tag)
+      - smaller by > 1 pt   → candidate for blockquote or caption
+      - very small (< 7 pt) → watermark/DRM noise → skip entirely
+      - larger / bold       → heading (handled later by format_for_tts)
+
+    Distinguishing blockquotes from captions: captions tend to be short
+    (≤ 3 lines), contain photo/illustration cues, or follow image blocks.
+    Blockquotes tend to be multi-line prose.
+    """
+    blocks = page.get_text("dict")["blocks"]
+    result_parts = []
+    prev_was_image = False
+    prev_was_caption = False
+
+    for block in blocks:
+        # Image blocks — skip, but flag so the next text block can be
+        # identified as a caption
+        if block["type"] == 1:
+            prev_was_image = True
+            continue
+
+        # Gather all spans in this block
+        spans = []
+        for line in block["lines"]:
+            for span in line["spans"]:
+                if span["text"].strip():
+                    spans.append(span)
+
+        if not spans:
+            prev_was_image = False
+            continue
+
+        # Determine dominant font size for this block (median)
+        sizes = sorted(span["size"] for span in spans)
+        dominant_size = sizes[len(sizes) // 2]
+
+        # Very small = watermark/DRM noise — drop entirely
+        if dominant_size < 7.0:
+            prev_was_image = False
+            continue
+
+        # Get block text the normal way (preserves line structure)
+        block_text = "\n".join(
+            "".join(span["text"] for span in line["spans"])
+            for line in block["lines"]
+        ).strip()
+
+        if not block_text:
+            prev_was_image = False
+            continue
+
+        size_diff = body_size - dominant_size  # positive = smaller than body
+
+        if size_diff > 1.0:
+            # Smaller than body text — blockquote or caption
+            lines = [l for l in block_text.split('\n') if l.strip()]
+
+            # Caption heuristics:
+            #   1. Immediately follows an image block, OR
+            #   2. Contains explicit photo/figure cue words
+            caption_cues = ('photo by', 'figure', 'image', 'illustration',
+                            'courtesy', 'credit', 'photograph')
+            any_line_lower = ' '.join(lines).lower()
+            looks_like_caption = (
+                prev_was_image
+                or prev_was_caption   # continuation of a multi-block caption
+                or any(cue in any_line_lower for cue in caption_cues)
+            )
+
+            if looks_like_caption:
+                result_parts.append(f"[CAPTION]{block_text}[/CAPTION]")
+                prev_was_caption = True
+            else:
+                result_parts.append(f"[BLOCKQUOTE]{block_text}[/BLOCKQUOTE]")
+                prev_was_caption = False
+        else:
+            result_parts.append(block_text)
+            prev_was_caption = False
+
+        prev_was_image = False
+
+    return "\n\n".join(p for p in result_parts if p.strip())
+
+
+def detect_body_font_size(doc) -> float:
+    """
+    Determine the body text font size for a document by finding the most
+    common font size across all pages (excluding very small sizes like
+    watermarks and very large sizes like headings).
+    """
+    size_counter = Counter()
+    for page in doc:
+        for block in page.get_text("dict")["blocks"]:
+            if block["type"] != 0:
+                continue
+            for line in block["lines"]:
+                for span in line["spans"]:
+                    if span["text"].strip():
+                        size = round(span["size"], 1)
+                        if 8.0 <= size <= 16.0:  # plausible body text range
+                            size_counter[size] += len(span["text"])
+
+    if not size_counter:
+        return 12.0  # fallback
+    return size_counter.most_common(1)[0][0]
 
 
 def extract_text(pdf_path: Path) -> list[str]:
@@ -600,10 +718,22 @@ def extract_text(pdf_path: Path) -> list[str]:
             print(f"    Description: {DIM}{e}{R}", file=sys.stderr)
         return []
 
+    # Detect body font size once across whole document
+    body_size = detect_body_font_size(doc)
+    use_font_aware = (body_size > 0)
+
     total = len(doc)
     for page_num in range(total):
         page = doc[page_num]
-        text = page.get_text("text")
+
+        # Font-aware extraction when possible (gives us blockquote/caption tags)
+        if use_font_aware:
+            try:
+                text = classify_page_blocks(page, body_size)
+            except Exception:
+                text = page.get_text("text")
+        else:
+            text = page.get_text("text")
 
         if len(text.strip()) < 50:
             if OCR_AVAILABLE:
@@ -682,6 +812,164 @@ def clean_page(text: str, repeating_lines: set[str]) -> str:
     return '\n'.join(cleaned_lines)
 
 
+def reflow_paragraphs(text: str) -> str:
+    """
+    Join soft line breaks (PDF hard-wrap artifacts) within paragraphs.
+
+    PDF text extraction preserves every line break from the rendered PDF layout,
+    so a single paragraph becomes many short lines. We join them into proper
+    flowing paragraphs so TTS doesn't pause at every line end.
+
+    Rules for keeping a line break (i.e. it IS a paragraph/section boundary):
+      - Blank line (double newline) → always kept
+      - Previous line ends with sentence-ending punctuation (.!?:") AND next
+        line starts with an uppercase letter → keep (new sentence/paragraph)
+      - Line is very short (≤ 4 chars) and looks like a heading or isolated
+        fragment → keep as its own line
+      - Next line starts with a bullet/dash/number list marker → keep
+
+    Otherwise: join with a space.
+    """
+    # Split into paragraph blocks first (preserve blank-line boundaries)
+    paragraph_blocks = re.split(r'\n{2,}', text)
+    reflowed_blocks = []
+
+    for block in paragraph_blocks:
+        lines = block.split('\n')
+        if len(lines) <= 1:
+            reflowed_blocks.append(block)
+            continue
+
+        joined = []
+        current = lines[0].rstrip()
+
+        for next_line in lines[1:]:
+            next_stripped = next_line.strip()
+
+            # Empty line within block — shouldn't happen after split but be safe
+            if not next_stripped:
+                joined.append(current)
+                current = ''
+                continue
+
+            # If current line is empty, start fresh
+            if not current.strip():
+                current = next_stripped
+                continue
+
+            cur_stripped = current.rstrip()
+
+            # Decide whether to join or keep as separate line
+            keep_break = False
+
+            # Short isolated lines (headings, chapter numbers, captions)
+            if len(cur_stripped) <= 6 and cur_stripped[-1:] not in '-,':
+                keep_break = True
+
+            # Current ends with sentence-terminating punctuation and next starts uppercase
+            elif cur_stripped and cur_stripped[-1] in '.!?"' and next_stripped and next_stripped[0].isupper():
+                keep_break = True
+
+            # Next line looks like a list item
+            elif re.match(r'^[\-•*\d]+[\.\)]\s', next_stripped):
+                keep_break = True
+
+            # Next line starts with an em-dash (block quote / attribution)
+            elif next_stripped.startswith('—') or next_stripped.startswith('-'):
+                keep_break = True
+
+            # Current line IS an attribution/quote marker (starts with —)
+            # The next line is a new paragraph
+            elif cur_stripped.startswith('—') and next_stripped and next_stripped[0].isupper():
+                keep_break = True
+
+            if keep_break:
+                joined.append(current)
+                current = next_stripped
+            else:
+                # Join with a space (handle case where current ends with hyphen)
+                if cur_stripped.endswith('-'):
+                    current = cur_stripped[:-1] + next_stripped
+                else:
+                    current = cur_stripped + ' ' + next_stripped
+
+        if current.strip():
+            joined.append(current)
+
+        reflowed_blocks.append('\n'.join(joined))
+
+    return '\n\n'.join(reflowed_blocks)
+
+
+def join_continued_blocks(text: str) -> str:
+    """
+    Merge paragraph blocks that are mid-sentence continuations.
+
+    PDF text is extracted block-by-block, and sentences often span two blocks
+    (e.g. split at a page break or column boundary). reflow_paragraphs handles
+    soft-wrapped lines within a block, but leaves double-newline block boundaries
+    intact. This function merges across those boundaries when the previous block
+    clearly doesn't end a sentence.
+
+    A block is a continuation if:
+      - The previous block doesn't end with sentence-terminating punctuation
+        (.  !  ?  :  "  \u201d) AND the current block starts with a lowercase letter.
+    """
+    SENTENCE_END = set('.!?:"\u201d')
+    blocks = re.split(r'\n\n+', text)
+    result = []
+    for block in blocks:
+        if not result:
+            result.append(block)
+            continue
+        prev = result[-1].rstrip()
+        curr = block.lstrip()
+        if prev and curr and prev[-1] not in SENTENCE_END and curr[0].islower():
+            result[-1] = prev + ' ' + curr
+        else:
+            result.append(block)
+    return '\n\n'.join(result)
+
+
+def strip_inline_footnote_numbers(text: str) -> str:
+    """
+    Remove footnote/endnote reference numbers from PDF-extracted text.
+
+    Two forms appear in PDF extractions:
+    1. Standalone line: a line containing only a small integer (not a year,
+       not surrounded by blank lines on both sides).
+    2. Trailing inline: a number glued to the end of a word with no space,
+       e.g. "Cook-Lynn1" or "earth."3  — superscript refs baked into the line.
+    """
+    lines = text.split('\n')
+    result = []
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        # A line that is ONLY a small number (1-3 digits, ≤ 999)
+        if re.match(r'^\d{1,3}$', stripped):
+            num = int(stripped)
+            # Don't remove if it's a plausible year (1700-2100)
+            if 1700 <= num <= 2100:
+                result.append(line)
+                continue
+            # Don't remove if surrounded by blank lines (could be a section number)
+            prev_blank = (i == 0) or (not lines[i - 1].strip())
+            next_blank = (i == len(lines) - 1) or (not lines[i + 1].strip())
+            if prev_blank and next_blank:
+                result.append(line)
+                continue
+            # Otherwise it's a footnote ref — drop it
+            continue
+        # Remove trailing inline footnote refs: word/punct immediately followed
+        # by 1-3 digits at end of line, e.g. "Cook-Lynn1" → "Cook-Lynn"
+        # or "earth."3 → "earth."
+        # Include curly quotes (U+2018/19, U+201C/D) — PDFs use these before
+        # sanitize_for_tts has run, so we need them here too.
+        line = re.sub(r'([a-zA-Z"\'.\!\?\u2018\u2019\u201c\u201d])\d{1,3}(\s*)$', r'\1\2', line)
+        result.append(line)
+    return '\n'.join(result)
+
+
 def clean_document(pages: list[str]) -> str:
     """Clean entire document."""
     if not pages:
@@ -700,38 +988,185 @@ def clean_document(pages: list[str]) -> str:
     cleaned_pages = [clean_page(page, lines_to_remove) for page in pages]
     text = '\n\n'.join(cleaned_pages)
 
-    # Fix hyphenation
+    # Fix hyphenation across line breaks (must happen before reflow).
+    # PRESERVE the hyphen when joining — compound words like "thirty-two",
+    # "scorched-earth", "well-known" should keep their hyphens.
+    # Soft-hyphen PDF artifacts like "comple-\ntion" become "comple-tion",
+    # which TTS handles better than "Thirtytwo" or "scorchedearth".
     text = re.sub(
         r'(\w+)-\n(\w+)',
-        lambda m: m.group(1) + m.group(2) if m.group(2)[0].islower() else m.group(0),
+        lambda m: m.group(1) + '-' + m.group(2) if m.group(2)[0].islower() else m.group(0),
         text
     )
+
+    # Fix possessives split by PDF glyph separation: "Vaughn' s" → "Vaughn's"
+    text = re.sub(r"(\w+)'\s+s\b", r"\1's", text)
+
+    # Remove inline footnote reference numbers
+    text = strip_inline_footnote_numbers(text)
+
+    # Reflow soft line breaks into proper paragraphs (within blocks)
+    text = reflow_paragraphs(text)
+
+    # Merge mid-sentence continuations that span PDF block boundaries
+    text = join_continued_blocks(text)
+
     text = re.sub(r'\n{3,}', '\n\n', text)
     return text.strip()
 
 
+def sanitize_for_tts(text: str) -> str:
+    """
+    Replace characters and sequences that RoboBraille misreads or vocalizes
+    poorly. This runs on the raw extracted text before any other formatting.
+
+    Known RoboBraille issues:
+      - Em dash (U+2014) → read aloud as the letter "A" (Latin-1 artifact)
+      - En dash (U+2013) → similar misread
+      - Long sequences of dashes (———) → garbled output
+      - Non-breaking space (U+00A0) → may cause word-join artifacts
+      - Curly quotes (U+2018/19, U+201C/D) → sometimes misread
+      - Ellipsis character (U+2026) → sometimes skipped
+      - Bullet (U+2022) → sometimes skipped
+    """
+    # Remove decorative separator lines BEFORE character substitution
+    # (so "————————" gets removed before the — chars are turned into " - ")
+    text = re.sub(r'^\s*[\u2014\u2013\u2015\-_=]{3,}\s*$', '', text, flags=re.MULTILINE)
+
+    replacements = [
+        # Em dash: replace with " - " so it reads naturally as a pause/dash
+        ('\u2014', ' - '),
+        # En dash: replace with " to " when between numbers, else " - "
+        # (simple blanket replacement is fine for TTS)
+        ('\u2013', ' - '),
+        # Non-breaking space → regular space
+        ('\u00a0', ' '),
+        # Curly/smart quotes → straight quotes
+        ('\u2018', "'"),
+        ('\u2019', "'"),
+        ('\u201c', '"'),
+        ('\u201d', '"'),
+        # Ellipsis character → three dots with spaces so TTS pauses
+        ('\u2026', '...'),
+        # Bullet → dash (most TTS reads dash fine)
+        ('\u2022', '-'),
+        # Horizontal bar (U+2015)
+        ('\u2015', ' - '),
+        # Figure dash (U+2012)
+        ('\u2012', '-'),
+    ]
+    for char, repl in replacements:
+        text = text.replace(char, repl)
+
+    # Collapse multiple spaces
+    text = re.sub(r'  +', ' ', text)
+
+    return text
+
+
 def format_for_tts(text: str, faithful: bool = False) -> str:
-    """Format text for TTS-friendly reading."""
+    """
+    Format text for TTS-friendly reading.
+
+    Handles:
+      - Sanitizing characters RoboBraille misreads (em dashes, curly quotes, etc.)
+      - [BLOCKQUOTE]...[/BLOCKQUOTE] sentinels → "Quote: ... End quote."
+      - [CAPTION]...[/CAPTION] sentinels → removed entirely
+      - Standalone chapter numbers → "Chapter N."
+      - ALL-CAPS section headings → "New section. Heading."
+      - Abbreviation expansion (et al., ibid., etc.)
+    """
+    # Sanitize problematic characters first
+    text = sanitize_for_tts(text)
+
+    # ── Block quotes ──────────────────────────────────────────────────────────
+    # First, merge consecutive [BLOCKQUOTE] blocks (e.g. quote body + attribution
+    # that the PDF stored as separate text blocks at the same smaller font size).
+    text = re.sub(
+        r'\[/BLOCKQUOTE\]\s*\[BLOCKQUOTE\]',
+        '\n',
+        text
+    )
+
+    # Now replace each [BLOCKQUOTE]...[/BLOCKQUOTE] with spoken framing.
+    def format_blockquote(m):
+        content = m.group(1).strip()
+        # Detect attribution line: starts with em-dash or " - " pattern,
+        # typically the last line of the block.
+        lines = content.split('\n')
+        body_lines = []
+        attribution = None
+        for line in lines:
+            s = line.strip()
+            if s.startswith('\u2014') or re.match(r'^[\- ]+[A-Z]', s):
+                attribution = re.sub(r'^[\u2014\- ]+', '', s).strip()
+                attribution = re.sub(r'\d{1,3}$', '', attribution).strip()  # strip trailing footnote ref
+            else:
+                body_lines.append(line)
+        body = ' '.join(l.strip() for l in body_lines if l.strip())
+        # Strip any trailing inline footnote ref from the quote body
+        body = re.sub(r'([a-zA-Z"\'\.\!\?])\d{1,3}\s*$', r'\1', body).strip()
+        result = f"Quote: {body} End quote."
+        if attribution:
+            result += f" {attribution}."
+        return f"\n\n{result}\n\n"
+
+    text = re.sub(
+        r'\[BLOCKQUOTE\](.*?)\[/BLOCKQUOTE\]',
+        format_blockquote,
+        text,
+        flags=re.DOTALL
+    )
+
+    # ── Captions → remove ────────────────────────────────────────────────────
+    text = re.sub(r'\[CAPTION\].*?\[/CAPTION\]', '', text, flags=re.DOTALL)
+
+    # ── Chapter numbers and section headings ─────────────────────────────────
     lines = text.split('\n')
     formatted_lines = []
-
-    for line in lines:
+    i = 0
+    while i < len(lines):
+        line = lines[i]
         stripped = line.strip()
+
+        # Standalone chapter number: a line that is just a number (1-2 digits),
+        # surrounded by blank lines, not a year.
+        if re.match(r'^\d{1,2}$', stripped):
+            num = int(stripped)
+            prev_blank = (i == 0) or not lines[i - 1].strip()
+            next_blank = (i == len(lines) - 1) or not lines[i + 1].strip()
+            if prev_blank and next_blank and num < 100:
+                formatted_lines.append('')
+                formatted_lines.append(f"Chapter {num}.")
+                formatted_lines.append('')
+                i += 1
+                continue
+
+        # Section heading: ALL CAPS line (or majority uppercase), short, no
+        # terminal sentence punctuation. Add "New section." before it.
         is_heading = False
-        if stripped and len(stripped) < 100:
-            if stripped.isupper() or (stripped[0].isupper() and sum(1 for c in stripped if c.isupper()) > len(stripped) * 0.3):
-                if stripped[-1] not in '.!?:;,':
+        if stripped and len(stripped) < 80:
+            upper_ratio = sum(1 for c in stripped if c.isupper()) / max(len(stripped), 1)
+            if (stripped.isupper() or upper_ratio > 0.6) and stripped[-1] not in '.!?:;,':
+                # Make sure it's not just an acronym mid-sentence
+                if len(stripped.split()) >= 1 and len(stripped) > 2:
                     is_heading = True
 
         if is_heading:
+            # Title-case the heading so it sounds natural when read aloud
+            # (avoids TTS reading each letter of "ORIGINS" as O-R-I-G-I-N-S
+            # on some engines, and is more pleasant regardless)
+            readable = stripped.title()
             formatted_lines.append('')
-            formatted_lines.append(stripped + '.')
+            formatted_lines.append(f"New section. {readable}.")
             formatted_lines.append('')
         else:
             formatted_lines.append(line)
+        i += 1
 
     text = '\n'.join(formatted_lines)
 
+    # ── Abbreviation expansion ────────────────────────────────────────────────
     if not faithful:
         for pattern, replacement in [
             (r'\bet al\.', 'and others'),
@@ -922,20 +1357,20 @@ def print_banner(first_time=True, header_only=False):
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         session_id = f"RS{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
 
-        # Wider banner for normie mode (89 columns instead of 67)
-        print(f"  ┌───────────────────────────────────────────────────────────────────────────────────────┐")
-        print(f"  │                                                                                       │")
-        print(f"  │             {BOLD}🏢 👔 📁 R O B O S T R I P P E R  v{VERSION} 📁 👔 🏢{R}                         │")
-        print(f"  │                                                                                       │")
-        print(f"  │          Document Metadata Extraction and Metadata Removal System                     │")
-        print(f"  │                                                                                       │")
-        print(f"  └───────────────────────────────────────────────────────────────────────────────────────┘")
+        # Narrower banner for normie mode (50 columns to match separator lines)
+        print(f"  ┌──────────────────────────────────────────────────┐")
+        print(f"  │                                                  │")
+        print(f"  │  🏢 👔 📁 R O B O S T R I P P E R  v{VERSION} 📁 👔 🏢  │")
+        print(f"  │                                                  │")
+        print(f"  │   Document Metadata Extraction and Removal       │")
+        print(f"  │                                                  │")
+        print(f"  └──────────────────────────────────────────────────┘")
         print("")
         print(f"  Session ID: {DIM}{session_id}{R}")
         print(f"  Timestamp:  {DIM}{timestamp}{R}")
         print(f"  Status:     {BOLD}{DIM}ACTIVE 🟢{R}")
         print("")
-        print(f"  {DIM}─────────────────────────────────────────────────────────────────────────────────────────{R}")
+        print(f"  {DIM}──────────────────────────────────────────────────{R}")
         print("")
 
         # Skip content if header_only mode
@@ -946,12 +1381,12 @@ def print_banner(first_time=True, header_only=False):
         if first_time:
             print(f"  Sorry, I can't concentrate without more fluorescent lighting.")
             print()
-            gray_spinner(2.5, "📋 Submitting Form FL-001: Request for Fluorescent Lighting Adjustment...")
-            gray_spinner(2.8, "⏳ Awaiting approval from Lighting Adjustment Supervisor...")
-            gray_spinner(3.2, "🏢 Escalating to Lighting Adjustment Supervisor's Supervisor...")
-            gray_spinner(2.0, "📊 Consulting corporate lighting policy manual (1,847 pages)...")
-            gray_spinner(2.5, "💡 Adjusting fluorescent lighting levels by 0.003%...")
-            gray_spinner(1.8, "📄 Completing mandatory post-adjustment documentation...")
+            gray_spinner(4.5, "📋 Submitting Form FL-001: Request for Fluorescent Lighting Adjustment...")
+            gray_spinner(5.0, "⏳ Awaiting approval from Lighting Adjustment Supervisor...")
+            gray_spinner(6.0, "🏢 Escalating to Lighting Adjustment Supervisor's Supervisor...")
+            gray_spinner(5.5, "📊 Consulting corporate lighting policy manual (1,847 pages)...")
+            gray_spinner(5.0, "💡 Adjusting fluorescent lighting levels by 0.003%...")
+            gray_spinner(4.0, "📄 Completing mandatory post-adjustment documentation...")
             print()
             print(f"  {WHITE}Whew, much better. Ready when you are. Hit Enter to continue.{R}")
             # Pause after the fluorescent lighting joke so user can see nothing changed
@@ -963,20 +1398,20 @@ def print_banner(first_time=True, header_only=False):
             # Clear screen and reprint the exact same banner (the joke!)
             print("\033[2J\033[H", end="")
 
-            # Reprint banner after the joke (wider banner for normie mode)
-            print(f"  ┌───────────────────────────────────────────────────────────────────────────────────────┐")
-            print(f"  │                                                                                       │")
-            print(f"  │               {BOLD}🏢 👔 📁 R O B O S T R I P P E R  v{VERSION} 📁 👔 🏢                       │")
-            print(f"  │                                                                                       │")
-            print(f"  │            Document Metadata Extraction and Metadata Removal System                   │")
-            print(f"  │                                                                                       │")
-            print(f"  └───────────────────────────────────────────────────────────────────────────────────────┘")
+            # Reprint banner after the joke (same narrow banner)
+            print(f"  ┌──────────────────────────────────────────────────┐")
+            print(f"  │                                                  │")
+            print(f"  │  🏢 👔 📁 R O B O S T R I P P E R  v{VERSION} 📁 👔 🏢  │")
+            print(f"  │                                                  │")
+            print(f"  │   Document Metadata Extraction and Removal       │")
+            print(f"  │                                                  │")
+            print(f"  └──────────────────────────────────────────────────┘")
             print("")
             print(f"  Session ID: {DIM}{session_id}{R}")
             print(f"  Timestamp:  {DIM}{timestamp}{R}")
             print(f"  Status:     {BOLD}ACTIVE {R}")
             print("")
-            print(f"  {DIM}─────────────────────────────────────────────────────────────────────────────────────────{R}")
+            print(f"  {DIM}──────────────────────────────────────────────────{R}")
             print("")
 
         # Main content (always shown)
@@ -1017,23 +1452,32 @@ def print_banner(first_time=True, header_only=False):
 
     print()
 
+    # In normie mode, scroll to top to show the banner (in GUI)
+    if CURRENT_PROFILE == "normie":
+        # Use ANSI code to move cursor to home position (top-left)
+        # This signals the GUI to scroll to top
+        print("\033[H", end="", flush=True)
+
 
 def gray_spinner(duration: float, message: str = ""):
-    """Show a gray, soul-crushing spinner for NORMIE mode delays."""
+    """Show a gray, soul-crushing spinner for NORMIE mode delays.
+
+    Prints message, waits for duration, then prints completion.
+    No in-place animation to avoid GUI text wrapping issues.
+    """
     import time
-    spinner_chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
-    end_time = time.time() + duration
-    i = 0
+    import sys
 
-    while time.time() < end_time:
-        char = spinner_chars[i % len(spinner_chars)]
-        # Clear line, then print spinner
-        print(f"\033[2K\r  {DIM}{char} {message}{R}", end="", flush=True)
-        time.sleep(0.1)
-        i += 1
+    # Print the task message (persistent) with immediate flush
+    print(f"  {DIM}⠿ {message}{R}", flush=True)
+    sys.stdout.flush()  # Force immediate output in GUI
 
-    # Clear spinner and show completion checkmark
-    print(f"\033[2K\r  {DIM}✓ {message}{R}")
+    # Wait for the duration (simulating work being done)
+    time.sleep(duration)
+
+    # Print completion with immediate flush
+    print(f"  {DIM}  ✓ Complete{R}", flush=True)
+    sys.stdout.flush()  # Force immediate output in GUI
 
 
 def gray_spinner_with_task(task_func, message: str = ""):
@@ -1201,18 +1645,8 @@ def pick_files(show_initial_banner=True, is_first_launch=True) -> list[Path]:
     """
     # Show banner for first time (or after profile switch)
     if show_initial_banner:
-        # Show just the header/title (no main menu content yet)
-        print_banner(header_only=True)
-
-        # Check for old files (shows cleanup prompt after header)
-        check_cleanup()
-
-        # Always clear screen to remove header_only banner
-        clear_screen()
-
-        # Show full banner with main menu content
-        # Include fluorescent joke only on first launch
         print_banner(first_time=is_first_launch)
+        check_cleanup()
 
     # Loop until we get valid files
     while True:
@@ -1429,9 +1863,9 @@ def process_file(input_path: Path, output_path: Optional[Path], preview: bool, f
 
     formatted_text = format_for_tts(cleaned_text, faithful=faithful)
 
-    # Prepend citation header
+    # Prepend citation header (sanitize special chars in title/author too)
     if citation_header:
-        formatted_text = citation_header + formatted_text
+        formatted_text = sanitize_for_tts(citation_header) + formatted_text
 
     if preview:
         print("\n" + "="*80)
@@ -1503,9 +1937,9 @@ def print_summary(output_files: list[Path], args):
         print(f"    {DIM}Saved in:{R} {CYAN}{output_files[0].parent}{R}")
     else:
         # NORMIE PROFILE: Soul-crushing bureaucratic summary
-        print(f"  {DIM}═════════════════════════════════════════════════════════════════════{R}")
+        print(f"  {DIM}══════════════════════════════════════════════════{R}")
         print(f"  📊 BATCH PROCESSING SUMMARY 📋{R}")
-        print(f"  {DIM}═════════════════════════════════════════════════════════════════════{R}")
+        print(f"  {DIM}══════════════════════════════════════════════════{R}")
         print()
         print(f"  Session completed: {DIM}{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ⏳{R}")
         print(f"  Total files processed:{DIM} {n} 📄{R}")

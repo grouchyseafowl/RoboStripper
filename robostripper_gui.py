@@ -208,7 +208,7 @@ class ANSITerminal(tk.Frame):
         # Output text area
         self.text = tk.Text(
             self,
-            wrap=tk.NONE,  # No wrapping - let terminal content control layout
+            wrap=tk.NONE,
             bg=BG_COLOR,
             fg=DEFAULT_FG,
             insertbackground=DEFAULT_FG,
@@ -300,15 +300,46 @@ class ANSITerminal(tk.Frame):
         self._ansi_state = ANSIState()
         self._tag_cache = {}
 
+        # Scroll indicator - shows when there's more content below
+        indicator_text = '↓ scroll for more ↓' if current_profile == 'cunty' else '↓ Additional content below. Scroll to continue. ↓'
+        indicator_fg = '#FF79C6' if current_profile == 'cunty' else '#666666'
+        self.scroll_indicator = tk.Label(
+            self,
+            text=indicator_text,
+            bg='#1a1a1a',
+            fg=indicator_fg,
+            font=('SF Pro', 10 if current_profile == 'cunty' else 9),
+            pady=4,
+        )
+        self._scroll_indicator_visible = False
+
+        # Track if user has scrolled to bottom (for attach button enabling)
+        # Start at top (False) so initial banner is visible
+        self._at_bottom = False
+
+        # Track if user has manually interacted (to stop forcing top view)
+        # This includes scrolling, typing, or clicking
+        self._user_has_interacted = False
+
         # Layout
         self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.text.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+        # Scroll indicator will be shown/hidden dynamically
         self.input_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=12, pady=(0, 12))
         self.input_field.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8))
         self.attach_button.pack(side=tk.RIGHT)
 
         # Bind Enter key
         self.input_field.bind('<Return>', self._on_enter)
+
+        # Bind key press to detect user interaction
+        self.input_field.bind('<Key>', lambda e: setattr(self, '_user_has_interacted', True))
+
+        # Bind scroll events to track position
+        self.text.bind('<MouseWheel>', self._on_scroll)
+        self.text.bind('<Button-4>', self._on_scroll)  # Linux scroll up
+        self.text.bind('<Button-5>', self._on_scroll)  # Linux scroll down
+        self.scrollbar.config(command=self._on_scrollbar)
 
         # Enable drag-and-drop for file paths
         self._setup_drag_drop()
@@ -332,8 +363,15 @@ class ANSITerminal(tk.Frame):
         # Load initial colors for current profile
         self._reconfigure_colors_for_profile(current_profile)
 
+        # Ensure view starts at top (not bottom) - do this BEFORE polling starts
+        self.text.mark_set('insert', '1.0')
+        self.text.see('1.0')
+
         # Start output polling
         self._poll_output()
+
+        # Update scroll state after a short delay (to check if content needs scrolling)
+        self.after(500, self._update_scroll_state)
 
         # Focus the input field
         self.input_field.focus_set()
@@ -405,9 +443,13 @@ class ANSITerminal(tk.Frame):
                 break
 
         # Cunty fonts - glamorous and fabulous!
-        self._title_font_cunty = tkfont.Font(family=runway_family, size=size+3, weight='bold')
-        self._title_font_r_cunty = tkfont.Font(family=script_family, size=size+7, weight='bold')
-        self._title_font_s_cunty = tkfont.Font(family=script_family, size=size+7, weight='bold')
+        # Use font tuples (family, size, style) — more reliable than Font objects in tags.
+        # Zapfino has extreme ascenders (linespace=92px at size 20) so we use a much
+        # smaller point size to keep the title line height proportional to Didot.
+        # At size 9, Zapfino linespace ≈ 41px; Didot at size+3 linespace ≈ 27px — 1.5x ratio.
+        self._title_font_cunty    = (runway_family, size + 5, 'normal')  # Didot: elegance is in normal weight
+        self._title_font_r_cunty  = (script_family, 13, 'normal')
+        self._title_font_s_cunty  = (script_family, 13, 'normal')
 
     def _init_normie_fonts(self, family, size):
         """Initialize soul-crushing normie mode fonts."""
@@ -427,10 +469,10 @@ class ANSITerminal(tk.Frame):
                 normie_family = font_name
                 break
 
-        # Normie fonts - all the same size, all the same boring font
-        self._title_font_normie = tkfont.Font(family=normie_family, size=size, weight='normal')
-        self._title_font_r_normie = tkfont.Font(family=normie_family, size=size, weight='normal')
-        self._title_font_s_normie = tkfont.Font(family=normie_family, size=size, weight='normal')
+        # Normie fonts - all the same size, all the same boring font (tuples for reliability)
+        self._title_font_normie   = (normie_family, size, 'normal')
+        self._title_font_r_normie = (normie_family, size, 'normal')
+        self._title_font_s_normie = (normie_family, size, 'normal')
 
     def _activate_cunty_fonts(self):
         """Switch to glamorous cunty fonts."""
@@ -621,6 +663,13 @@ class ANSITerminal(tk.Frame):
         self.input_field.delete(0, tk.END)
         self.input_queue.put(text)
         self._input_ready.set()
+
+        # User submitted command - they want to see response at bottom
+        self._user_has_interacted = True
+        self._at_bottom = True
+        self.text.see(tk.END)
+        self._update_scroll_state()
+
         return 'break'
 
     def _attach_files(self):
@@ -748,6 +797,69 @@ class ANSITerminal(tk.Frame):
         self.input_field.delete(0, tk.END)
         self.input_field.insert(0, quoted_paths)
 
+    def _force_show_indicator(self):
+        """Test method to force show the scroll indicator."""
+        if not self._scroll_indicator_visible:
+            self.scroll_indicator.pack(side=tk.BOTTOM, fill=tk.X, before=self.input_frame)
+            self._scroll_indicator_visible = True
+            print("DEBUG: Forced indicator to show", file=sys.stderr)
+
+    def _on_scroll(self, event):
+        """Handle scroll events to update scroll indicator and attach button."""
+        # User has manually scrolled - stop forcing top view
+        self._user_has_interacted = True
+        # Let the default scroll happen first
+        self.after(10, self._update_scroll_state)
+        return
+
+    def _on_scrollbar(self, *args):
+        """Handle scrollbar movement."""
+        # User has manually scrolled - stop forcing top view
+        self._user_has_interacted = True
+        self.text.yview(*args)
+        self._update_scroll_state()
+
+    def _update_scroll_state(self):
+        """Update scroll indicator visibility and attach button state."""
+        try:
+            # Check if we're at the bottom
+            yview = self.text.yview()
+
+            # yview returns (top_fraction, bottom_fraction)
+            # e.g., (0.0, 1.0) = all content visible, (0.0, 0.5) = top half visible
+            # e.g., (0.5, 1.0) = bottom half visible
+
+            at_bottom = yview[1] >= 0.99  # Within 1% of bottom
+            self._at_bottom = at_bottom
+
+            # Show scroll indicator if there's content below the viewport
+            # This happens when yview[1] < 1.0 (not showing all the way to the end)
+            has_content_below = yview[1] < 0.99
+            should_show_indicator = has_content_below
+
+            if should_show_indicator and not self._scroll_indicator_visible:
+                # Show the indicator
+                self.scroll_indicator.pack(side=tk.BOTTOM, fill=tk.X, before=self.input_frame)
+                self._scroll_indicator_visible = True
+            elif not should_show_indicator and self._scroll_indicator_visible:
+                # Hide the indicator
+                self.scroll_indicator.pack_forget()
+                self._scroll_indicator_visible = False
+
+            # Update attach button state - disabled until scrolled to bottom
+            # (Normie mode only - cunty users don't have to scroll)
+            if self._current_profile == 'normie':
+                if at_bottom:
+                    self.attach_button.config(state=tk.NORMAL)
+                else:
+                    self.attach_button.config(state=tk.DISABLED)
+            else:
+                # Cunty mode - always enabled
+                self.attach_button.config(state=tk.NORMAL)
+        except Exception as e:
+            # Silently ignore errors - they happen on every render cycle
+            pass
+
     def _check_profile_change(self):
         """Check if profile changed and update UI if needed."""
         if not self._profile_config_path.exists():
@@ -856,6 +968,19 @@ class ANSITerminal(tk.Frame):
         # Update input field cursor and foreground color
         self.input_field.config(insertbackground=cursor_color, fg=DEFAULT_FG)
 
+        # Update scroll indicator text and color
+        indicator_text = '↓ scroll for more ↓' if profile == 'cunty' else '↓ Additional content below. Scroll to continue. ↓'
+        indicator_fg = '#FF79C6' if profile == 'cunty' else '#666666'
+        indicator_font_size = 10 if profile == 'cunty' else 9
+        self.scroll_indicator.config(
+            text=indicator_text,
+            fg=indicator_fg,
+            font=('SF Pro', indicator_font_size)
+        )
+
+        # Update attach button state based on profile
+        self._update_scroll_state()
+
     def _poll_output(self):
         """Poll the output queue and render text."""
         # Check for profile changes every poll cycle (~60fps is fine for this)
@@ -924,8 +1049,15 @@ class ANSITerminal(tk.Frame):
 
             pos = match.end()
 
-        # Auto-scroll to bottom
-        self.text.see(tk.END)
+        # Scroll behavior:
+        # - Keep view at top until user interacts (scroll/type/click)
+        # - Once user interacts and is at bottom, follow new content (sticky scroll)
+        if not self._user_has_interacted:
+            # Keep view at top until user does something
+            self.text.see('1.0')
+        elif self._at_bottom:
+            # User is at bottom, follow new content
+            self.text.see(tk.END)
 
     def _write_text(self, text):
         """Write plain text with current ANSI styling."""
@@ -1054,10 +1186,10 @@ class RoboStripperApp:
         # Menlo has better box-drawing characters than Monaco
         for font_name in ['Menlo', 'SF Mono', 'Monaco', 'Courier New']:
             if font_name in tkfont.families():
-                self.terminal.set_font(font_name, 13)
+                self.terminal.set_font(font_name, 17)
                 break
         else:
-            self.terminal.set_font('TkFixedFont', 13)
+            self.terminal.set_font('TkFixedFont', 17)
 
         # Handle window close
         self.root.protocol('WM_DELETE_WINDOW', self._on_close)
