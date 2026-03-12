@@ -4,11 +4,13 @@
 
 Removes repetitive headers, footers, copyright stamps, download timestamps, and platform URLs that clutter academic PDFs — so RoboBraille can read your PDFs aloud without interruptions.
 
+TUI is fully functional - GUI is in the works. 
+
 ---
 
 ## 📥 Download
 
-### Stopgap TUI (All OS) — Double‑Click Launchers (No Terminal Needed)
+### TUI (All OS) — Double‑Click Launchers (No Terminal Needed)
 
 This is the fastest path while the GUI is being cleaned up. It runs the **TUI**.
 
